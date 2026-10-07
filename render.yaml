@@ -1,0 +1,30 @@
+# Blueprint do Render: cria o banco PostgreSQL e a API Node de uma vez.
+# No Render: New + > Blueprint > selecione o repositório (com este arquivo em backend/).
+databases:
+  - name: trifarmas-db
+    plan: free
+    databaseName: trifarmas
+    user: trifarmas
+
+services:
+  - type: web
+    name: trifarmas-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: trifarmas-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GOOGLE_CLIENT_ID
+        value: 926034754304-3445g4kqdp62m6ukdda14t17ebml1v3s.apps.googleusercontent.com
+      - key: CORS_ORIGINS
+        sync: false   # preencha com a URL do Vercel, ex: https://trifarmas.vercel.app
+      - key: ALLOW_DEMO_GOOGLE
+        value: "true"
