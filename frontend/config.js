@@ -4,7 +4,7 @@ window.TRIFARMAS_CONFIG = {
   // Em desenvolvimento local, aponta para o backend rodando na sua máquina.
   API_URL: ['localhost', '127.0.0.1'].includes(location.hostname)
     ? 'http://localhost:3000'
-    : 'https://trifarmas-api.onrender.com',
+    : 'https://trifarmast.onrender.com',
 
   // Client ID do Google (Google Cloud Console > Credenciais > ID do cliente OAuth 2.0).
   // Lembre de adicionar a URL do Vercel em "Origens JavaScript autorizadas".
