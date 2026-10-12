@@ -37,7 +37,6 @@ const api = (() => {
 
     // Perfil
     updateMe: data => patch('/me', data),
-    markWelcomeSeen: () => post('/me/welcome-seen'),
 
     // Catálogo
     catalog: () => get('/catalog'),
@@ -48,6 +47,8 @@ const api = (() => {
     orders: () => get('/orders'),
     createOrder: data => post('/orders', data),
     confirmPickup: id => post(`/orders/${id}/pickup`),
+    sendPrescription: (id, data) => post(`/orders/${id}/prescription`, data),
+    getPrescription: id => get(`/orders/${id}/prescription`),
 
     // Lembretes
     reminders: () => get('/reminders'),
@@ -55,7 +56,8 @@ const api = (() => {
     removeReminder: id => del(`/reminders/${id}`),
     markRemindersFired: ids => post('/reminders/fired', { ids }),
 
-    // Recompensas
-    redeemReward: id => post(`/rewards/${id}/redeem`),
+    // Pontos
+    points: () => get('/points'),
+    redeemReward: id => post(`/points/rewards/${id}/redeem`),
   };
 })();

@@ -1,15 +1,15 @@
 /* =============================================================
    Trifarmas — front-end (Vercel)
-   Os dados (usuários, pedidos, pontos, lembretes, catálogo) ficam
-   no banco do backend (Render). Este arquivo só cuida da interface
-   e conversa com a API através de api.js.
+   Núcleo do app: login, navegação, busca, pontos, lembretes e perfil.
+   Outros módulos: location.js (mapa), cart.js (carrinho e pagamento),
+   orders.js (pedidos e receitas). Os dados ficam no backend (Render).
    ============================================================= */
 
 const { GOOGLE_CLIENT_ID } = window.TRIFARMAS_CONFIG;
 
 const LOGO_SRC = 'assets/logo.png';
 const WELCOME_MESSAGE = 'Seja bem-vindo(a) ao Trifarmas! Estamos felizes em ajudar você a economizar e cuidar da sua saúde.';
-const POINT_VALUE = 0.05; // 1 ponto = R$0,05 de desconto
+const RESULTS_PAGE_SIZE = 10;
 
 const NAV_ITEMS = [
   {id:'home', label:'Buscar', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>'},
@@ -22,13 +22,17 @@ const NAV_ITEMS = [
 ];
 
 const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
+const ICON_RX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>';
+const ICON_CART_PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.6 12.2a1 1 0 001 .8h9.7a1 1 0 001-.8L21 7H6.2"/><path d="M13 9v4M11 11h4"/></svg>';
 
-let state = {
+const state = {
   user:null,
   theme:'light',
   points:0,
   activeTab:'home',
   activeCat:'Todos',
+  resultsLimit: RESULTS_PAGE_SIZE,
+  expandedMeds: new Set(),
   reminders:[],
   orders:[],
   calMonth: new Date().getMonth(),
@@ -36,15 +40,64 @@ let state = {
   calSelectedDay: new Date().getDate(),
   customMeds: [], // remédios digitados pelo usuário que não estão no catálogo
   catalog: { pharmacies: [], medicines: [], rewards: [] },
+  pointsInfo: { pending: 0, coupons: [], history: [] },
 };
 
 /* ---------------- utilidades ---------------- */
 
 const $ = id => document.getElementById(id);
-const formatBRL = value => 'R$ ' + value.toFixed(2).replace('.',',');
+const formatBRL = value => Number(value || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
+const formatKm = km => km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1).replace('.', ',')} km`;
 
 function escapeHtml(str){
-  return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return String(str ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Remove acentos para buscas ("dipirona" encontra "Dipirona Sódica").
+const normalizeText = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+const storage = {
+  get(key){ try{ return JSON.parse(localStorage.getItem(key)); }catch{ return null; } },
+  set(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch{ /* modo privado */ } },
+};
+
+function readFileAsDataURL(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Reduz a imagem antes de enviar (fotos de celular têm vários MB).
+// square=true recorta no centro (usado na foto de perfil).
+async function resizeImage(file, maxSize, { square = false, quality = 0.85 } = {}){
+  const url = URL.createObjectURL(file);
+  try{
+    const img = await new Promise((resolve, reject)=>{
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Formato de imagem não suportado. Use JPG ou PNG.'));
+      image.src = url;
+    });
+    let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight;
+    if(square){
+      const side = Math.min(sw, sh);
+      sx = (sw - side) / 2; sy = (sh - side) / 2; sw = sh = side;
+    }
+    const scale = Math.min(1, maxSize / Math.max(sw, sh));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(sw * scale);
+    canvas.height = Math.round(sh * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', quality);
+  }finally{
+    URL.revokeObjectURL(url);
+  }
 }
 
 function applyLogo(){
@@ -63,34 +116,71 @@ async function loadCatalog(){
   try{
     state.catalog = await api.catalog();
     buildChips();
+    if(state.user) renderResults();
   }catch(e){
     showToast(e.message);
   }
 }
 
 const allMeds = () => [...state.catalog.medicines, ...state.customMeds];
+const medById = id => allMeds().find(m=>m.id===id);
 const pharmacyById = id => state.catalog.pharmacies.find(p=>p.id===id);
-const pharmacyLogo = pharm => `https://logo.clearbit.com/${pharm.domain}?size=80`;
+const pharmacyLogo = pharm => `https://www.google.com/s2/favicons?domain=${pharm.domain}&sz=64`;
+
+function pharmacyLogoHtml(pharm, extraClass = ''){
+  const letter = escapeHtml(pharm.name.charAt(0));
+  return `<img class="pharm-dot ${extraClass}" src="${pharmacyLogo(pharm)}" alt="" loading="lazy"
+    onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'pharm-dot pharm-dot-fallback ${extraClass}',textContent:'${letter}'}));">`;
+}
 
 /* ---------------- foto de perfil ---------------- */
 
-function previewAvatar(input, targetId, isSettings){
-  if(!input.files || !input.files[0]) return;
-  const reader = new FileReader();
-  reader.onload = async e => {
-    $(targetId).src = e.target.result;
-    if(isSettings && state.user){
-      // A foto escolhida aqui substitui a do Google e fica salva na conta.
-      try{
-        const { user } = await api.updateMe({ avatar: e.target.result });
-        state.user = { ...state.user, ...user };
-        $('sidebar-avatar').src = state.user.avatar;
-      }catch(err){
-        showToast(err.message);
-      }
-    }
-  };
-  reader.readAsDataURL(input.files[0]);
+// Avatar com as iniciais, gerado no próprio navegador (não depende de serviço externo).
+function initialsAvatar(name){
+  const initials = String(name || 'T').trim().split(/\s+/).slice(0, 2).map(w => w.charAt(0).toUpperCase()).join('') || 'T';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2fa85e"/><text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="26" font-weight="700" fill="#fff">${escapeHtml(initials)}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+// Se a foto não carregar (link expirado, sem internet), mostra as iniciais.
+function setAvatar(img, src){
+  img.referrerPolicy = 'no-referrer'; // necessário para fotos do Google
+  img.onerror = () => { img.onerror = null; img.src = initialsAvatar(state.user && state.user.name); };
+  img.src = src || initialsAvatar(state.user && state.user.name);
+}
+
+let signupAvatarData = null;
+async function pickSignupAvatar(input){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file) return;
+  try{
+    signupAvatarData = await resizeImage(file, 320, { square:true });
+    $('signup-avatar-preview').src = signupAvatarData;
+  }catch(e){ showToast(e.message); }
+}
+
+// A foto escolhida manualmente substitui a do Google e fica salva na conta.
+async function pickSettingsAvatar(input){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file || !state.user) return;
+  try{
+    const avatar = await resizeImage(file, 320, { square:true });
+    const { user } = await api.updateMe({ avatar });
+    state.user = { ...state.user, ...user };
+    refreshProfileUI();
+    showToast('Foto atualizada!');
+  }catch(e){ showToast(e.message); }
+}
+
+async function resetGooglePhoto(){
+  try{
+    const { user } = await api.updateMe({ resetAvatar: true });
+    state.user = { ...state.user, ...user };
+    refreshProfileUI();
+    showToast('Voltamos a usar a foto da sua Conta Google.');
+  }catch(e){ showToast(e.message); }
 }
 
 /* ---------------- login com Google ---------------- */
@@ -134,7 +224,8 @@ function initGoogleSignIn(){
   $('google-btn-login').classList.remove('hidden');
   $('google-btn-signup').classList.remove('hidden');
 
-  const buttonOptions = { type:'standard', theme:'outline', size:'large', shape:'pill', width:320, logo_alignment:'left' };
+  const width = Math.min(320, Math.max(220, $('view-login').clientWidth - 100));
+  const buttonOptions = { type:'standard', theme:'outline', size:'large', shape:'pill', width, logo_alignment:'left' };
   google.accounts.id.renderButton($('google-btn-login'), { ...buttonOptions, text:'signin_with' });
   google.accounts.id.renderButton($('google-btn-signup'), { ...buttonOptions, text:'signup_with' });
 
@@ -142,7 +233,7 @@ function initGoogleSignIn(){
 }
 
 /* O Google devolve um ID Token (JWT) assinado. Ele é enviado ao backend,
-   que valida a assinatura e cria/recupera a conta no banco. */
+   que valida a assinatura, cria/recupera a conta e atualiza a foto. */
 async function handleGoogleCredential(response){
   try{
     const session = await api.googleLogin(response.credential);
@@ -160,9 +251,7 @@ async function handleGoogleCredential(response){
 async function googleAuthDemo(mode){
   try{
     const session = await api.googleDemo(mode);
-    showToast(mode==='signup'
-      ? 'Conta demo criada! (configure o GOOGLE_CLIENT_ID para login real)'
-      : 'Login demo realizado! (configure o GOOGLE_CLIENT_ID para login real)');
+    showToast('Entrou com a conta demo (configure o GOOGLE_CLIENT_ID para login real).');
     await enterApp(session);
   }catch(e){
     showToast(e.message);
@@ -194,7 +283,8 @@ async function doSignup(){
   const password = $('signup-pass').value;
   if(!name || !email || !password){ showToast('Preencha todos os campos.'); return; }
   try{
-    const session = await api.signup({ name, email, password, avatar: $('signup-avatar-preview').src });
+    const session = await api.signup({ name, email, password, avatar: signupAvatarData || undefined });
+    signupAvatarData = null;
     showToast('Conta criada! Você ganhou 50 pontos de boas-vindas.');
     await enterApp(session);
   }catch(e){
@@ -206,10 +296,12 @@ function doLogout(){
   api.setToken(null);
   stopOrderTimers();
   if(reminderCheckInterval){ clearInterval(reminderCheckInterval); reminderCheckInterval=null; }
+  closeCheckout();
   state.user = null;
   state.orders = [];
   state.reminders = [];
   state.customMeds = [];
+  state.pointsInfo = { pending: 0, coupons: [], history: [] };
   $('app').classList.add('hidden');
   showView('login');
   $('login-pass').value='';
@@ -219,13 +311,18 @@ async function enterApp(session){
   api.setToken(session.token);
   state.user = session.user;
   state.points = session.user.points;
+  state.resultsLimit = RESULTS_PAGE_SIZE;
+  loadCart();
 
   // Carrega do banco os dados desta conta.
   try{
-    const [orders, reminders, customMeds] = await Promise.all([api.orders(), api.reminders(), api.customMeds()]);
-    state.orders = orders.map(o => ({ ...o, createdAt: new Date(o.createdAt) }));
+    const [orders, reminders, customMeds, pointsInfo] = await Promise.all([
+      api.orders(), api.reminders(), api.customMeds(), api.points(),
+    ]);
+    setOrders(orders);
     state.reminders = reminders;
     state.customMeds = customMeds;
+    applyPointsInfo(pointsInfo);
   }catch(e){
     showToast(e.message);
   }
@@ -239,30 +336,29 @@ async function enterApp(session){
   $('settings-pass-google-note').classList.toggle('hidden', !state.user.googleAccount);
   updatePointsUI();
   updateOrdersBadge();
-  state.orders.forEach(scheduleOrderProgress);
+  updateCartUI();
   startReminderEngine();
   switchTab('home');
+  initLocationSilently();
 
-  // Pop-up de boas-vindas: apenas no primeiro login da conta.
-  if(!state.user.welcomeSeen) openWelcomePopup();
+  // Pop-up de boas-vindas: o servidor só libera na primeira entrada da conta.
+  if(session.showWelcome) openWelcomePopup();
 }
 
 function refreshProfileUI(){
   const firstName = state.user.name.split(' ')[0];
-  $('home-greeting').textContent = `Olá, ${firstName}! Pesquise um remédio e veja as farmácias mais perto de você.`;
-  $('settings-avatar').src = state.user.avatar;
+  $('home-greeting').textContent = `Olá, ${firstName}! Pesquise um remédio e compare o preço nas farmácias perto de você.`;
+  setAvatar($('settings-avatar'), state.user.avatar);
+  setAvatar($('sidebar-avatar'), state.user.avatar);
   $('settings-name').value = state.user.name;
   $('settings-email').value = state.user.email;
-  $('sidebar-avatar').src = state.user.avatar;
   $('sidebar-name').textContent = state.user.name;
+  $('reset-google-photo').classList.toggle('hidden', !(state.user.hasGooglePhoto && state.user.avatarCustom));
 }
 
-/* Pop-up de boas-vindas com blur sobre a tela inicial. */
 function openWelcomePopup(){
   $('welcome-popup-text').textContent = WELCOME_MESSAGE;
   $('welcome-overlay').classList.remove('hidden');
-  state.user.welcomeSeen = true;
-  api.markWelcomeSeen().catch(()=>{});
 }
 function closeWelcomePopup(){
   $('welcome-overlay').classList.add('hidden');
@@ -275,7 +371,7 @@ function buildNav(){
     <button class="nav-item" data-tab="${it.id}" onclick="switchTab('${it.id}')">${it.icon}<span>${it.label}</span></button>
   `).join('') + `
     <div class="sidebar-foot" onclick="switchTab('settings')" style="cursor:pointer;">
-      <img id="sidebar-avatar" src="" alt="">
+      <img id="sidebar-avatar" src="" alt="" referrerpolicy="no-referrer">
       <div>
         <p class="name" id="sidebar-name">—</p>
         <p class="role">Ver perfil</p>
@@ -284,7 +380,7 @@ function buildNav(){
   `;
   $('bottom-nav').innerHTML = NAV_ITEMS.map(it=>{
     if(it.center){
-      return `<button class="bn-scan" data-tab="${it.id}" onclick="switchTab('${it.id}')">${it.icon}</button>`;
+      return `<button class="bn-scan" data-tab="${it.id}" onclick="switchTab('${it.id}')" aria-label="${it.label}">${it.icon}</button>`;
     }
     return `<button class="bn-item" data-tab="${it.id}" onclick="switchTab('${it.id}')">${it.icon}<span>${it.label}</span></button>`;
   }).join('');
@@ -296,59 +392,100 @@ function switchTab(id){
   $('tab-'+id).classList.remove('hidden');
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.tab===id));
   document.querySelectorAll('.bn-item').forEach(b=>b.classList.toggle('active', b.dataset.tab===id));
+  document.querySelector('.content').scrollTop = 0;
 
   if(id==='map') initMap();
   if(id==='scanner') startScanner();
   else stopScanner();
   if(id==='calendar'){ renderCalendar(); requestNotificationPermission(); }
   if(id==='orders') renderOrders();
-  if(id==='points') renderPoints();
+  if(id==='points'){ renderPoints(); refreshPoints(); }
   if(id==='home') renderResults();
+  updateCartUI();
 }
 
-function toggleTheme(){
-  state.theme = state.theme==='light' ? 'dark' : 'light';
-  document.body.setAttribute('data-theme', state.theme);
-  $('settings-theme-switch').classList.toggle('on', state.theme==='dark');
-  $('theme-icon').innerHTML = state.theme==='dark'
+function applyTheme(theme){
+  state.theme = theme;
+  document.body.setAttribute('data-theme', theme);
+  $('settings-theme-switch').classList.toggle('on', theme==='dark');
+  $('theme-icon').innerHTML = theme==='dark'
     ? '<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>'
     : '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
 }
+function toggleTheme(){
+  applyTheme(state.theme==='light' ? 'dark' : 'light');
+  storage.set('trifarmas-theme', state.theme);
+}
 
-/* ---------------- busca: qualquer remédio, qualquer farmácia ---------------- */
+/* ---------------- busca ---------------- */
 
 function buildChips(){
   const cats = ['Todos', ...new Set(state.catalog.medicines.map(m=>m.cat))];
+  if(state.customMeds.length) cats.push('Outros');
   $('chip-row').innerHTML = cats.map(c=>
-    `<button class="chip ${c===state.activeCat?'active':''}" data-cat="${c}" onclick="setCat('${c}')">${c}</button>`
+    `<button class="chip ${c===state.activeCat?'active':''}" data-cat="${escapeHtml(c)}" onclick="setCat(this.dataset.cat)">${escapeHtml(c)}</button>`
   ).join('');
 }
 function setCat(cat){
   state.activeCat = cat;
+  state.resultsLimit = RESULTS_PAGE_SIZE;
   document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.cat===cat));
   renderResults();
 }
 
-function renderResults(){
-  const rawQuery = $('search-input').value.trim();
-  const q = rawQuery.toLowerCase();
+let searchDebounce = null;
+function onSearchInput(){
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(()=>{ state.resultsLimit = RESULTS_PAGE_SIZE; renderResults(); }, 120);
+}
+
+function filteredMeds(){
+  const q = normalizeText($('search-input').value.trim());
   let meds = allMeds();
   if(state.activeCat !== 'Todos') meds = meds.filter(m=>m.cat===state.activeCat);
-  if(q) meds = meds.filter(m=>m.name.toLowerCase().includes(q));
+  if(!q) return meds;
+  const terms = q.split(/\s+/);
+  return meds
+    .map(m=>{
+      const name = normalizeText(m.name);
+      const haystack = `${name} ${normalizeText(m.ingredient)} ${normalizeText(m.cat)}`;
+      if(!terms.every(t=>haystack.includes(t))) return null;
+      return { m, score: (name.startsWith(terms[0]) ? 2 : 0) + (name.includes(q) ? 1 : 0) };
+    })
+    .filter(Boolean)
+    .sort((a,b)=> b.score-a.score || (b.m.popularity||0)-(a.m.popularity||0))
+    .map(x=>x.m);
+}
+
+function renderResults(){
+  const rawQuery = $('search-input').value.trim();
+  const meds = filteredMeds();
+  const shown = meds.slice(0, state.resultsLimit);
+
+  let meta = '';
+  if(meds.length){
+    meta = rawQuery
+      ? `${meds.length} resultado${meds.length>1?'s':''} para "${escapeHtml(rawQuery)}"`
+      : (state.activeCat==='Todos' ? 'Mais procurados' : escapeHtml(state.activeCat)) + ` · ${meds.length} remédios`;
+  }
+  $('results-meta').innerHTML = meta;
 
   let html = '';
-
   if(meds.length===0){
     html += `<div class="empty-state">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <p>Nenhum remédio encontrado na nossa base ainda.</p>
     </div>`;
   } else {
-    html += meds.map(renderMedCard).join('');
+    html += shown.map(renderMedCard).join('');
+    if(meds.length > shown.length){
+      html += `<button class="btn btn-ghost load-more" onclick="showMoreResults()">Mostrar mais (${meds.length - shown.length})</button>`;
+    }
   }
 
-  // Se o usuário digitou algo que não existe na base, permite adicionar e comprar mesmo assim.
-  if(q && !meds.some(m=>m.name.toLowerCase()===q)){
+  // Remédio fora da base: permite adicionar e comprar mesmo assim.
+  const q = normalizeText(rawQuery);
+  if(q && !meds.some(m=>normalizeText(m.name)===q)){
     const safe = escapeHtml(rawQuery);
     html += `
     <div class="custom-med-card">
@@ -360,44 +497,74 @@ function renderResults(){
   $('results-wrap').innerHTML = html;
 }
 
+function showMoreResults(){
+  state.resultsLimit += RESULTS_PAGE_SIZE;
+  renderResults();
+}
+
+function toggleMedPharmacies(medId){
+  if(state.expandedMeds.has(medId)) state.expandedMeds.delete(medId);
+  else state.expandedMeds.add(medId);
+  renderResults();
+}
+
+// Farmácias com preço para um remédio, ordenadas por preço e distância.
+function pharmacyOffers(med){
+  return Object.entries(med.prices)
+    .map(([pid, price])=>{
+      const pharm = pharmacyById(pid);
+      return pharm ? { ...pharm, price, ...pharmacyDistance(pharm) } : null;
+    })
+    .filter(Boolean)
+    .sort((a,b)=> a.price-b.price || a.km-b.km);
+}
+
+function rxBadge(){
+  return `<span class="rx-badge" title="Precisa de receita médica">${ICON_RX}Exige receita</span>`;
+}
+
 function renderMedCard(med){
-  const entries = Object.entries(med.prices)
-    .map(([pid,price])=>({...pharmacyById(pid), price}))
-    .filter(e=>e.id)
-    .sort((a,b)=> a.price-b.price || a.dist-b.dist);
-  if(entries.length===0) return '';
-  const best = entries[0];
-  const nearest = [...entries].sort((a,b)=>a.dist-b.dist).slice(0,4);
-  const shown = nearest.some(e=>e.id===best.id) ? nearest : [best, ...nearest.slice(0,3)];
-  const savings = Math.round((1-best.price/Math.max(...entries.map(e=>e.price)))*100);
+  const offers = pharmacyOffers(med);
+  if(offers.length===0) return '';
+  const best = offers[0];
+  const expanded = state.expandedMeds.has(med.id);
+  const shown = expanded ? offers : offers.slice(0, 4);
+  const maxPrice = Math.max(...offers.map(e=>e.price));
+  const savings = Math.round((1-best.price/maxPrice)*100);
+  const inCart = cartQuantity(med.id);
+  const details = [med.presentation, med.ingredient].filter(Boolean).map(escapeHtml).join(' · ');
 
   return `
-  <div class="result-card">
+  <article class="result-card">
     <div class="result-top">
       <div class="result-med">
         <h3>${escapeHtml(med.name)}</h3>
-        <div class="sub">${escapeHtml(med.cat)} · a partir de <strong>R$ ${best.price.toFixed(2)}</strong></div>
+        ${details ? `<div class="sub">${details}</div>` : ''}
+        <div class="result-tags">
+          ${med.rx ? rxBadge() : ''}
+          ${savings > 0 ? `<span class="best-tag">Economize até ${savings}%</span>` : ''}
+          ${inCart ? `<span class="incart-tag">${inCart} no carrinho</span>` : ''}
+        </div>
       </div>
-      <span class="best-tag">Economize até ${savings}%</span>
+      <div class="from-price"><span>a partir de</span><b>${formatBRL(best.price)}</b></div>
     </div>
     <div class="pharm-list">
       ${shown.map(e=>`
         <div class="pharm-row ${e.id===best.id?'top':''}">
+          ${pharmacyLogoHtml(e)}
           <div class="pharm-info">
-            <img class="pharm-dot" src="${pharmacyLogo(e)}" alt="${e.name}" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'pharm-dot pharm-dot-fallback',textContent:'${e.name.charAt(0)}'}));">
-            <div>
-              <p class="pharm-name">${e.name} ${e.id===best.id?'<span class="best-pill">Melhor preço</span>':''}</p>
-              <p class="pharm-meta">${e.dist.toFixed(1)} km de você</p>
-            </div>
+            <p class="pharm-name">${escapeHtml(e.name)} ${e.id===best.id?'<span class="best-pill">Menor preço</span>':''}</p>
+            <p class="pharm-meta">${e.label}</p>
           </div>
-          <div class="pharm-price">
-            <div class="price">R$ ${e.price.toFixed(2)}</div>
-            <button class="pharm-buy-btn" onclick="openCheckout('${med.id}','${e.id}')">Comprar aqui</button>
-          </div>
+          <div class="price">${formatBRL(e.price)}</div>
+          <button class="pharm-buy-btn" onclick="addToCart('${med.id}','${e.id}')" aria-label="Adicionar ao carrinho na ${escapeHtml(e.name)}">
+            ${ICON_CART_PLUS}<span>Adicionar</span>
+          </button>
         </div>
       `).join('')}
     </div>
-  </div>`;
+    ${offers.length > 4 ? `<button class="link-more" onclick="toggleMedPharmacies('${med.id}')">${expanded ? 'Ver menos farmácias' : `Ver todas as ${offers.length} farmácias`}</button>` : ''}
+  </article>`;
 }
 
 async function addCustomMed(){
@@ -406,217 +573,12 @@ async function addCustomMed(){
   try{
     const med = await api.addCustomMed(name);
     state.customMeds.push(med);
+    buildChips();
     renderResults();
-    showToast(`"${name}" adicionado! Escolha a farmácia que preferir, independente do preço.`);
+    showToast(`"${name}" adicionado! Escolha a farmácia que preferir.`);
   }catch(e){
     showToast(e.message);
   }
-}
-
-/* ---------------- checkout / pagamento (tela cheia) ---------------- */
-
-function openCheckout(medId, pharmId){
-  const med = allMeds().find(m=>m.id===medId);
-  const pharm = pharmacyById(pharmId);
-  if(!med || !pharm) return;
-  const price = med.prices[pharmId];
-  const maxPointsUsable = Math.max(0, Math.min(state.points, Math.floor(price / POINT_VALUE)));
-
-  const screen = document.createElement('div');
-  screen.className = 'checkout-screen';
-  screen.id = 'checkout-screen';
-  screen.innerHTML = `
-    <header class="checkout-topbar">
-      <button class="icon-btn" onclick="closeCheckout()" title="Voltar" aria-label="Voltar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
-      </button>
-      <h3>Finalizar compra</h3>
-      <span class="checkout-topbar-spacer"></span>
-    </header>
-    <div class="checkout-scroll">
-      <div class="checkout-box">
-        <div class="checkout-summary">
-          <p class="co-med">${escapeHtml(med.name)}</p>
-          <p class="co-pharm">${escapeHtml(pharm.name)} · ${pharm.dist.toFixed(1)} km de você</p>
-        </div>
-        <div class="checkout-line"><span>Valor do produto</span><b>${formatBRL(price)}</b></div>
-        <div class="checkout-points">
-          <label>Usar pontos para desconto (você tem ${state.points} pts)</label>
-          <input type="range" id="co-points-range" min="0" max="${maxPointsUsable}" value="0" ${maxPointsUsable===0?'disabled':''} oninput="updateCheckoutTotal(${price})">
-          <div class="checkout-points-val"><span id="co-points-used">0</span> pts usados = <span id="co-discount">R$ 0,00</span> de desconto</div>
-        </div>
-        <div class="checkout-line total"><span>Total a pagar</span><b id="co-total">${formatBRL(price)}</b></div>
-        <div class="field">
-          <label>Forma de pagamento</label>
-          <select id="co-payment-method">
-            <option value="Cartão de crédito">Cartão de crédito</option>
-            <option value="Pix">Pix</option>
-            <option value="Dinheiro na retirada">Dinheiro na retirada</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" id="co-confirm-btn" onclick="confirmCheckout('${medId}','${pharmId}')">Confirmar pagamento</button>
-        <button class="btn-outline-sm checkout-cancel" onclick="closeCheckout()">Cancelar</button>
-      </div>
-    </div>`;
-  document.body.appendChild(screen);
-  document.addEventListener('keydown', onCheckoutKeydown);
-}
-
-function onCheckoutKeydown(e){
-  if(e.key==='Escape') closeCheckout();
-}
-
-function closeCheckout(){
-  const screen = $('checkout-screen');
-  if(screen) screen.remove();
-  document.removeEventListener('keydown', onCheckoutKeydown);
-}
-
-function updateCheckoutTotal(price){
-  const range = $('co-points-range');
-  const pointsUsed = range ? +range.value : 0;
-  const discount = pointsUsed * POINT_VALUE;
-  $('co-points-used').textContent = pointsUsed;
-  $('co-discount').textContent = formatBRL(discount);
-  $('co-total').textContent = formatBRL(Math.max(0, price - discount));
-}
-
-async function confirmCheckout(medId, pharmId){
-  const btn = $('co-confirm-btn');
-  if(btn.disabled) return;
-  btn.disabled = true;
-
-  const range = $('co-points-range');
-  const pointsUsed = range ? +range.value : 0;
-  const paymentMethod = $('co-payment-method').value;
-
-  try{
-    const result = await api.createOrder({ medicineId: medId, pharmacyId: pharmId, pointsUsed, paymentMethod });
-    const order = { ...result.order, createdAt: new Date(result.order.createdAt) };
-    state.orders.unshift(order);
-    state.points = result.points;
-    updatePointsUI();
-    updateOrdersBadge();
-    closeCheckout();
-    scheduleOrderProgress(order);
-
-    showModal(
-      ICON_CHECK,
-      'Pagamento confirmado!',
-      `${escapeHtml(order.medName)} reservado na ${escapeHtml(order.pharmName)}. Você pagou <strong>${formatBRL(order.paidAmount)}</strong>${order.pointsUsed>0?` (com ${order.pointsUsed} pts de desconto)`:''} via ${order.paymentMethod}. Acompanhe o status na aba <strong>Pedidos</strong> — os <strong>+${order.points} pontos</strong> de cashback só são creditados quando você confirmar a retirada.`
-    );
-  }catch(e){
-    btn.disabled = false;
-    showToast(e.message);
-  }
-}
-
-/* ---------------- pedidos ---------------- */
-
-// O backend calcula o status pelo horário do pedido; aqui só atualizamos a tela nos mesmos momentos.
-const ORDER_STEPS = ['Pedido recebido','Em preparação','Pronto para retirar','Concluído'];
-const ORDER_STEP_DELAYS = [['Em preparação', 3500], ['Pronto para retirar', 8000]];
-let orderTimers = [];
-
-function scheduleOrderProgress(order){
-  if(order.status==='Concluído') return;
-  const elapsed = Date.now() - order.createdAt.getTime();
-  ORDER_STEP_DELAYS.forEach(([status, delay])=>{
-    if(ORDER_STEPS.indexOf(status) <= ORDER_STEPS.indexOf(order.status)) return;
-    orderTimers.push(setTimeout(()=> advanceOrder(order.id, status), Math.max(0, delay - elapsed)));
-  });
-}
-
-function stopOrderTimers(){
-  orderTimers.forEach(clearTimeout);
-  orderTimers = [];
-}
-
-function advanceOrder(orderId, status){
-  const order = state.orders.find(o=>o.id===orderId);
-  if(!order || order.status==='Concluído') return;
-  order.status = status;
-  if(state.activeTab==='orders') renderOrders();
-  updateOrdersBadge();
-  if(status==='Pronto para retirar') showToast(`${order.medName} está pronto para retirar na ${order.pharmName}!`);
-}
-
-async function confirmPickup(orderId){
-  const order = state.orders.find(o=>o.id===orderId);
-  if(!order || order.status !== 'Pronto para retirar') return;
-  try{
-    const result = await api.confirmPickup(orderId);
-    order.status = result.order.status;
-    state.points = result.points;
-    updatePointsUI();
-    renderOrders();
-    updateOrdersBadge();
-    showToast(`Pedido concluído! +${order.points} pontos creditados.`);
-  }catch(e){
-    showToast(e.message);
-  }
-}
-
-function updateOrdersBadge(){
-  const readyCount = state.orders.filter(o=>o.status==='Pronto para retirar').length;
-  document.querySelectorAll('[data-tab="orders"] .nav-badge, [data-tab="orders"] .bn-dot').forEach(el=>el.remove());
-  if(readyCount===0) return;
-  const sideBtn = document.querySelector('.nav-item[data-tab="orders"]');
-  if(sideBtn) sideBtn.insertAdjacentHTML('beforeend', `<span class="nav-badge">${readyCount}</span>`);
-  const bnBtn = document.querySelector('.bn-item[data-tab="orders"]');
-  if(bnBtn) bnBtn.insertAdjacentHTML('beforeend', `<span class="bn-dot"></span>`);
-}
-
-const STATUS_BADGE_CLASS = {
-  'Pedido recebido':'status-received', 'Em preparação':'status-preparing',
-  'Pronto para retirar':'status-ready', 'Concluído':'status-done'
-};
-
-function renderOrders(){
-  const wrap = $('orders-list');
-  if(state.orders.length===0){
-    wrap.innerHTML = `<div class="empty-state">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8l8-4 8 4v8l-8 4-8-4V8z"/><path d="M4 8l8 4 8-4M12 12v8"/></svg>
-      <p>Você ainda não fez nenhum pedido. Compare preços na aba Buscar e reserve seu remédio.</p>
-    </div>`;
-    return;
-  }
-  wrap.innerHTML = state.orders.map(o=>{
-    const stepIdx = ORDER_STEPS.indexOf(o.status);
-    const dateStr = o.createdAt.toLocaleDateString('pt-BR', {day:'2-digit', month:'short', year:'numeric'});
-    const timeStr = o.createdAt.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-    return `
-    <div class="order-card">
-      <div class="order-top">
-        <div>
-          <h3>${escapeHtml(o.medName)}</h3>
-          <div class="sub">${escapeHtml(o.pharmName)} · ${dateStr} às ${timeStr}</div>
-        </div>
-        <span class="status-badge ${STATUS_BADGE_CLASS[o.status]}">${o.status}</span>
-      </div>
-      <div class="order-track">
-        ${ORDER_STEPS.map((s,i)=>`
-          <div class="otrack-step ${i<=stepIdx?'done':''}">
-            <div class="otrack-line"></div>
-            <div class="otrack-dot"></div>
-            <div class="otrack-label">${s}</div>
-          </div>
-        `).join('')}
-      </div>
-      <div class="order-payment">
-        <div class="order-pay-row"><span>Valor pago</span><b>${formatBRL(o.paidAmount)}</b></div>
-        ${o.pointsUsed ? `<div class="order-pay-row muted"><span>Desconto com pontos</span><span>-${formatBRL(o.discount)} (${o.pointsUsed} pts)</span></div>` : ''}
-        ${o.paymentMethod ? `<div class="order-pay-row muted"><span>Pagamento</span><span>${o.paymentMethod}</span></div>` : ''}
-        <div class="order-pay-row muted"><span>Data e horário</span><span>${dateStr} · ${timeStr}</span></div>
-      </div>
-      <div class="order-code">
-        <span>Código de retirada</span>
-        <b>${o.code}</b>
-      </div>
-      ${o.status==='Pronto para retirar' ? `<button class="confirm-pickup-btn" onclick="confirmPickup(${o.id})">Confirmar retirada e receber pontos</button>` : ''}
-      ${o.status==='Concluído' ? `<div class="order-earned">+${o.points} pontos creditados</div>` : ''}
-    </div>`;
-  }).join('');
 }
 
 /* ---------------- scanner ---------------- */
@@ -641,6 +603,7 @@ async function startScanner(){
       return;
     }
   }
+  if(state.activeTab !== 'scanner'){ stopScanner(); return; }
   video.srcObject = scannerStream;
   status.textContent = 'Aponte para o código de barras ou a caixa do remédio.';
 }
@@ -648,8 +611,8 @@ function stopScanner(){
   if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream=null; }
 }
 function buildScannerMockList(){
-  $('scanner-mock-list').innerHTML = state.catalog.medicines.slice(0,6).map(m=>
-    `<button class="chip" onclick="scanResult('${m.id}')">${m.name.split(' ')[0]}</button>`
+  $('scanner-mock-list').innerHTML = state.catalog.medicines.slice(0,8).map(m=>
+    `<button class="chip" onclick="scanResult('${m.id}')">${escapeHtml(m.name)}</button>`
   ).join('');
 }
 function mockCapture(){
@@ -660,50 +623,10 @@ function mockCapture(){
 function scanResult(medId){
   const med = state.catalog.medicines.find(m=>m.id===medId);
   showToast(`Identificado: ${med.name}`);
-  switchTab('home');
   $('search-input').value = med.name;
-  setCat('Todos');
-  renderResults();
-}
-
-/* ---------------- mapa real (Google Maps) ---------------- */
-
-const DEFAULT_MAP_CENTER = [-23.5505, -46.6333]; // São Paulo
-let mapInitialized = false;
-
-function initMap(){
-  if(!mapInitialized){
-    mapInitialized = true;
-    requestMapLocation();
-  }
-}
-
-function loadMapAt(lat, lng){
-  $('gmap-frame').src = `https://www.google.com/maps?q=farm%C3%A1cia&ll=${lat},${lng}&z=15&output=embed`;
-}
-
-function requestMapLocation(){
-  const status = $('map-status');
-  status.textContent = 'Obtendo sua localização…';
-  status.classList.remove('hidden');
-  const useFallback = message => {
-    status.textContent = message;
-    loadMapAt(...DEFAULT_MAP_CENTER);
-    setTimeout(()=> status.classList.add('hidden'), 2500);
-  };
-  if(!('geolocation' in navigator)){
-    useFallback('Localização indisponível — mostrando região padrão.');
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(
-    pos=>{
-      loadMapAt(pos.coords.latitude, pos.coords.longitude);
-      status.textContent = 'Localização encontrada!';
-      setTimeout(()=> status.classList.add('hidden'), 1800);
-    },
-    ()=> useFallback('Não foi possível obter sua localização — mostrando região padrão.'),
-    {enableHighAccuracy:true, timeout:8000}
-  );
+  state.activeCat = 'Todos';
+  buildChips();
+  switchTab('home');
 }
 
 /* ---------------- calendário / lembretes ---------------- */
@@ -775,12 +698,13 @@ function renderCalendar(){
   $('cal-month-label').textContent = `${MONTHS[state.calMonth]} ${state.calYear}`;
   const firstDow = new Date(state.calYear, state.calMonth, 1).getDay();
   const daysInMonth = new Date(state.calYear, state.calMonth+1, 0).getDate();
+  if(state.calSelectedDay > daysInMonth) state.calSelectedDay = daysInMonth;
   let html = DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('');
   for(let i=0;i<firstDow;i++) html += `<div class="cal-day muted"></div>`;
   for(let d=1; d<=daysInMonth; d++){
     const hasRem = state.reminders.some(r=> r.day===d && r.month===state.calMonth && r.year===state.calYear);
     const sel = state.calSelectedDay===d;
-    html += `<div class="cal-day ${sel?'selected':''} ${hasRem?'has-rem':''}" onclick="calSelectDay(${d})">${d}</div>`;
+    html += `<button class="cal-day ${sel?'selected':''} ${hasRem?'has-rem':''}" onclick="calSelectDay(${d})">${d}</button>`;
   }
   $('cal-grid').innerHTML = html;
   renderReminderList();
@@ -824,37 +748,87 @@ function renderReminderList(){
     <div class="rem-item">
       <div class="rem-time">${r.time}</div>
       <div class="rem-info"><p>${escapeHtml(r.med)}</p><span>Dia ${r.day} de ${MONTHS[r.month]}</span></div>
-      <button class="rem-del" onclick="removeReminder(${r.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6h12z"/></svg></button>
+      <button class="rem-del" onclick="removeReminder(${r.id})" aria-label="Excluir lembrete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6h12z"/></svg></button>
     </div>
   `).join('');
 }
 
-/* ---------------- pontos ---------------- */
+/* ---------------- pontos ----------------
+   Regras (calculadas no servidor):
+   - 1 ponto para cada R$1 pago, creditado ao confirmar a retirada.
+   - Pontos são trocados por cupons de desconto, usados no pagamento. */
+
+function applyPointsInfo(info){
+  state.points = info.points;
+  state.pointsInfo = { pending: info.pending, coupons: info.coupons, history: info.history };
+}
+
+async function refreshPoints(){
+  try{
+    applyPointsInfo(await api.points());
+    updatePointsUI();
+    if(state.activeTab==='points') renderPoints();
+  }catch{ /* mantém os dados atuais */ }
+}
 
 function updatePointsUI(){
-  $('topbar-points').textContent = state.points;
-  $('points-big').textContent = state.points;
-  $('points-value').textContent = (state.points*POINT_VALUE).toFixed(2).replace('.',',');
+  $('topbar-points').textContent = state.points.toLocaleString('pt-BR');
+  $('points-big').textContent = state.points.toLocaleString('pt-BR');
+  const pending = state.pointsInfo.pending;
+  $('points-pending').textContent = pending > 0
+    ? `+${pending.toLocaleString('pt-BR')} pts a receber quando você retirar seus pedidos`
+    : 'Compre pelo app para acumular pontos';
+
+  const next = state.catalog.rewards.find(r=>r.cost > state.points);
+  const bar = $('points-progress-bar');
+  if(next){
+    bar.style.width = `${Math.min(100, state.points / next.cost * 100)}%`;
+    $('points-next').textContent = `Faltam ${(next.cost - state.points).toLocaleString('pt-BR')} pts para o cupom de ${next.name}`;
+  } else {
+    bar.style.width = '100%';
+    $('points-next').textContent = state.catalog.rewards.length ? 'Você já pode trocar por qualquer cupom!' : '';
+  }
 }
+
 function renderPoints(){
   updatePointsUI();
-  $('reward-grid').innerHTML = state.catalog.rewards.map(r=>`
+  $('reward-grid').innerHTML = state.catalog.rewards.map(r=>{
+    const missing = r.cost - state.points;
+    return `
     <div class="reward-card">
-      <h4>${r.name}</h4>
-      <p>${r.desc}</p>
-      <div class="reward-cost">${r.cost} pts</div>
-      <button class="reward-btn" ${state.points<r.cost?'disabled':''} onclick="redeem('${r.id}')">Resgatar</button>
-    </div>
-  `).join('');
+      <h4>${escapeHtml(r.name)}</h4>
+      <p>${escapeHtml(r.desc)}</p>
+      <div class="reward-cost">${r.cost.toLocaleString('pt-BR')} pts</div>
+      <button class="reward-btn" ${missing>0?'disabled':''} onclick="redeem('${r.id}')">${missing>0 ? `Faltam ${missing.toLocaleString('pt-BR')} pts` : 'Trocar por cupom'}</button>
+    </div>`;
+  }).join('');
+
+  const coupons = state.pointsInfo.coupons;
+  $('coupon-list').innerHTML = coupons.length ? coupons.map(c=>`
+    <div class="coupon-item">
+      <div class="coupon-icon">%</div>
+      <div><p>${escapeHtml(c.name)}</p><span>${c.minOrder>0 ? `Em compras a partir de ${formatBRL(c.minOrder)}` : 'Em qualquer compra'} · use na tela de pagamento</span></div>
+    </div>`).join('')
+    : `<div class="empty-inline">Você ainda não tem cupons. Troque seus pontos acima.</div>`;
+
+  const history = state.pointsInfo.history;
+  $('points-history').innerHTML = history.length ? history.map(h=>`
+    <div class="history-item">
+      <div><p>${escapeHtml(h.description)}</p><span>${new Date(h.createdAt).toLocaleDateString('pt-BR', {day:'2-digit', month:'short', year:'numeric'})}</span></div>
+      <b class="${h.delta>=0?'pos':'neg'}">${h.delta>=0?'+':''}${h.delta.toLocaleString('pt-BR')} pts</b>
+    </div>`).join('')
+    : `<div class="empty-inline">Nenhuma movimentação ainda.</div>`;
 }
+
 async function redeem(id){
   const reward = state.catalog.rewards.find(x=>x.id===id);
   if(!reward || state.points<reward.cost) return;
   try{
     const result = await api.redeemReward(id);
     state.points = result.points;
+    await refreshPoints();
     renderPoints();
-    showToast(`Resgatado: ${reward.name}!`);
+    showToast(`Cupom de ${reward.name} liberado! Use na tela de pagamento.`);
   }catch(e){
     showToast(e.message);
   }
@@ -893,29 +867,43 @@ async function saveSettings(){
 let toastTimer=null;
 function showToast(msg){
   const t = $('toast');
-  t.innerHTML = `${ICON_CHECK} ${msg}`;
+  t.innerHTML = `${ICON_CHECK} <span>${escapeHtml(msg)}</span>`;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=> t.classList.remove('show'), 3200);
+  toastTimer = setTimeout(()=> t.classList.remove('show'), 3400);
 }
-function showModal(iconSvg, title, bodyHtml){
+
+/* Modal no centro da tela. buttons: [{label, primary, onClick}] */
+function showModal(iconSvg, title, bodyHtml, buttons = [{ label:'Entendi', primary:true }], { tone = '' } = {}){
   const back = document.createElement('div');
   back.className='modal-back';
-  back.innerHTML = `<div class="modal-box">
+  back.innerHTML = `<div class="modal-box ${tone}" role="dialog" aria-modal="true">
     <div class="icon-circle">${iconSvg}</div>
     <h3>${title}</h3>
     <p>${bodyHtml}</p>
-    <button class="btn btn-primary" style="max-width:100%;">Entendi</button>
+    <div class="modal-actions"></div>
   </div>`;
-  back.querySelector('button').onclick = ()=> back.remove();
+  const actions = back.querySelector('.modal-actions');
+  buttons.forEach(b=>{
+    const btn = document.createElement('button');
+    btn.className = b.primary ? 'btn btn-primary' : 'btn btn-ghost';
+    btn.textContent = b.label;
+    btn.onclick = ()=>{ back.remove(); if(b.onClick) b.onClick(); };
+    actions.appendChild(btn);
+  });
   back.onclick = (e)=>{ if(e.target===back) back.remove(); };
   document.body.appendChild(back);
+  actions.querySelector('button').focus();
+  return back;
 }
 
 /* ---------------- inicialização ---------------- */
 
-applyLogo();
-buildNav();
-showView('login');
-initGoogleSignIn();
-loadCatalog();
+function initApp(){
+  applyLogo();
+  buildNav();
+  applyTheme(storage.get('trifarmas-theme') === 'dark' ? 'dark' : 'light');
+  showView('login');
+  initGoogleSignIn();
+  loadCatalog();
+}

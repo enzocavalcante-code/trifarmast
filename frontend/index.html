@@ -2,13 +2,16 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1e8a4c">
 <title>Trifarmas — Compare, economize e cuide da sua saúde</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <link rel="stylesheet" href="styles.css">
 <script src="https://accounts.google.com/gsi/client" async defer onload="onGsiLoad()"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" defer></script>
 </head>
 <body data-theme="light">
 
@@ -19,8 +22,8 @@
       <img class="app-logo-img wordmark" alt="Trifarmas">
     </div>
     <div id="login-error" class="auth-error hidden"></div>
-    <div class="field"><label>E-mail</label><input id="login-email" type="email" placeholder="voce@email.com" value="trifarmas@gmail.com"></div>
-    <div class="field"><label>Senha</label><input id="login-pass" type="password" placeholder="••••••••" value="123456"></div>
+    <div class="field"><label for="login-email">E-mail</label><input id="login-email" type="email" autocomplete="email" placeholder="voce@email.com" value="trifarmas@gmail.com"></div>
+    <div class="field"><label for="login-pass">Senha</label><input id="login-pass" type="password" autocomplete="current-password" placeholder="••••••••" value="123456" onkeydown="if(event.key==='Enter') doLogin()"></div>
     <button class="btn btn-primary" onclick="doLogin()">Entrar</button>
     <div class="or-divider"><span>ou</span></div>
     <div id="google-btn-login" class="google-btn-wrap"></div>
@@ -41,15 +44,13 @@
     </div>
     <div class="avatar-pick">
       <img id="signup-avatar-preview" class="avatar-preview" src="https://api.dicebear.com/7.x/initials/svg?seed=Novo&backgroundColor=2fa85e&textColor=ffffff" alt="">
-      <div>
-        <label class="btn-outline-sm" style="cursor:pointer; display:inline-block;">Escolher foto
-          <input type="file" accept="image/*" class="hidden" onchange="previewAvatar(this,'signup-avatar-preview')">
-        </label>
-      </div>
+      <label class="btn-outline-sm" style="cursor:pointer; display:inline-block;">Escolher foto
+        <input type="file" accept="image/*" class="hidden" onchange="pickSignupAvatar(this)">
+      </label>
     </div>
-    <div class="field"><label>Nome completo</label><input id="signup-name" type="text" placeholder="Seu nome"></div>
-    <div class="field"><label>E-mail</label><input id="signup-email" type="email" placeholder="voce@email.com"></div>
-    <div class="field"><label>Senha</label><input id="signup-pass" type="password" placeholder="Crie uma senha"></div>
+    <div class="field"><label for="signup-name">Nome completo</label><input id="signup-name" type="text" autocomplete="name" placeholder="Seu nome"></div>
+    <div class="field"><label for="signup-email">E-mail</label><input id="signup-email" type="email" autocomplete="email" placeholder="voce@email.com"></div>
+    <div class="field"><label for="signup-pass">Senha</label><input id="signup-pass" type="password" autocomplete="new-password" placeholder="Mínimo de 6 caracteres"></div>
     <button class="btn btn-primary" onclick="doSignup()">Criar conta</button>
     <div class="or-divider"><span>ou</span></div>
     <div id="google-btn-signup" class="google-btn-wrap"></div>
@@ -75,8 +76,12 @@
       <img class="app-logo-img topbar-logo" alt="Trifarmas">
     </div>
     <div class="topbar-right">
-      <button class="points-pill" onclick="switchTab('points')" title="Ver meus pontos"><svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2l2.9 6.3 6.9.7-5.2 4.7 1.5 6.8L12 17l-6.1 3.5 1.5-6.8L2.2 9l6.9-.7z"/></svg> <span id="topbar-points">0</span> pts</button>
-      <button class="icon-btn" onclick="toggleTheme()" title="Alternar tema">
+      <button class="points-pill" onclick="switchTab('points')" title="Ver meus pontos"><svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2l2.9 6.3 6.9.7-5.2 4.7 1.5 6.8L12 17l-6.1 3.5 1.5-6.8L2.2 9l6.9-.7z"/></svg> <span id="topbar-points">0</span> <span class="pts-suffix">pts</span></button>
+      <button class="icon-btn cart-btn" onclick="openCart()" title="Carrinho" aria-label="Abrir carrinho">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.6 12.2a1 1 0 001 .8h9.7a1 1 0 001-.8L21 7H6.2"/></svg>
+        <span id="cart-count" class="cart-count hidden">0</span>
+      </button>
+      <button class="icon-btn" onclick="toggleTheme()" title="Alternar tema" aria-label="Alternar tema">
         <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
       </button>
     </div>
@@ -97,28 +102,44 @@
         <div class="search-box">
           <div class="search-input-wrap">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-            <input id="search-input" type="text" placeholder="Digite qualquer remédio, mesmo que não esteja na lista..." oninput="renderResults()">
+            <input id="search-input" type="search" enterkeyhint="search" placeholder="Nome do remédio ou princípio ativo" oninput="onSearchInput()">
           </div>
-          <button class="scan-mini" onclick="switchTab('scanner')" title="Escanear remédio">
+          <button class="scan-mini" onclick="switchTab('scanner')" title="Escanear remédio" aria-label="Escanear remédio">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V5a1 1 0 011-1h2M20 7V5a1 1 0 00-1-1h-2M4 17v2a1 1 0 001 1h2M20 17v2a1 1 0 01-1 1h-2M4 12h16"/></svg>
           </button>
         </div>
+        <div class="location-hint hidden" id="location-hint"></div>
         <div class="chip-row" id="chip-row"></div>
+        <div class="results-meta" id="results-meta"></div>
         <div id="results-wrap"></div>
       </section>
 
       <!-- ---- MAPA ---- -->
       <section id="tab-map" class="hidden">
-        <div class="section-head"><h2>Farmácias próximas</h2><p>Mapa real do Google Maps mostrando apenas farmácias perto de você.</p></div>
+        <div class="section-head"><h2>Farmácias próximas</h2><p>Use sua localização ou digite um endereço/CEP para ver as farmácias ao redor.</p></div>
+        <div class="loc-bar">
+          <div class="loc-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
+            <input id="loc-input" type="search" enterkeyhint="search" placeholder="Endereço, bairro ou CEP" onkeydown="if(event.key==='Enter') searchAddress()">
+            <button class="loc-go" onclick="searchAddress()" aria-label="Buscar endereço">Buscar</button>
+          </div>
+          <button class="btn-outline-sm loc-gps" onclick="requestMapLocation(true)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>
+            Usar minha localização
+          </button>
+        </div>
+        <div class="loc-status" id="loc-status">Obtendo sua localização…</div>
         <div class="map-wrap" id="map-wrap">
-          <div id="map-status" class="map-status">Obtendo sua localização…</div>
-          <iframe id="gmap-frame" class="gmap-frame" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+          <div id="leaflet-map" class="leaflet-host"></div>
+          <iframe id="gmap-frame" class="gmap-frame hidden" loading="lazy" referrerpolicy="no-referrer-when-downgrade" title="Mapa"></iframe>
         </div>
         <div class="map-legend">
-          <span><i class="legend-dot" style="background:#2b7de1"></i> Sua localização (aproximada)</span>
-          <span><i class="legend-dot" style="background:var(--green-600)"></i> Farmácias no Google Maps</span>
+          <span><i class="legend-dot" style="background:#2b7de1"></i> Você</span>
+          <span><i class="legend-dot" style="background:var(--green-600)"></i> Farmácias</span>
+          <span><i class="legend-dot" style="background:var(--gold)"></i> Redes parceiras</span>
         </div>
-        <button class="btn-outline-sm" style="margin-top:10px;" onclick="requestMapLocation()">Atualizar minha localização</button>
+        <h3 class="list-title" id="pharmacy-list-title">Mais perto de você</h3>
+        <div id="pharmacy-list" class="pharmacy-list"></div>
       </section>
 
       <!-- ---- SCANNER ---- -->
@@ -147,17 +168,17 @@
         <div class="section-head"><h2>Lembretes de medicação</h2><p>Escolha um dia, horário e remédio para ser lembrado.</p></div>
         <div class="cal-card">
           <div class="cal-head">
-            <button class="icon-btn" onclick="calShiftMonth(-1)">‹</button>
+            <button class="icon-btn" onclick="calShiftMonth(-1)" aria-label="Mês anterior">‹</button>
             <h3 id="cal-month-label"></h3>
-            <button class="icon-btn" onclick="calShiftMonth(1)">›</button>
+            <button class="icon-btn" onclick="calShiftMonth(1)" aria-label="Próximo mês">›</button>
           </div>
           <div class="cal-grid" id="cal-grid"></div>
           <div class="rem-form">
-            <div class="field"><label>Remédio</label><input id="rem-med" type="text" placeholder="Ex: Losartana 50mg"></div>
+            <div class="field"><label for="rem-med">Remédio</label><input id="rem-med" type="text" placeholder="Ex: Losartana 50mg"></div>
             <div class="row-2">
-              <div class="field"><label>Horário</label><input id="rem-time" type="time" value="08:00"></div>
-              <div class="field"><label>Repetir</label>
-                <input id="rem-repeat-display" type="text" value="Somente este dia" disabled style="opacity:.7">
+              <div class="field"><label for="rem-time">Horário</label><input id="rem-time" type="time" value="08:00"></div>
+              <div class="field"><label for="rem-repeat-display">Repetir</label>
+                <input id="rem-repeat-display" type="text" value="Somente este dia" disabled>
               </div>
             </div>
             <button class="btn btn-primary" onclick="addReminder()">Definir lembrete</button>
@@ -174,21 +195,28 @@
 
       <!-- ---- PONTOS ---- -->
       <section id="tab-points" class="hidden">
-        <div class="section-head"><h2>Meus pontos</h2><p>Ganhe pontos comprando pelo app e troque por descontos.</p></div>
+        <div class="section-head"><h2>Meus pontos</h2><p>Ganhe pontos comprando pelo app e troque por cupons de desconto.</p></div>
         <div class="points-hero">
           <div class="label">Saldo disponível</div>
           <div class="big"><span id="points-big">0</span> pts</div>
-          <div class="sub">≈ R$ <span id="points-value">0,00</span> em descontos</div>
+          <div class="sub" id="points-pending"></div>
+          <div class="points-progress"><div class="points-progress-bar" id="points-progress-bar"></div></div>
+          <div class="sub" id="points-next"></div>
         </div>
+        <h3 class="list-title">Trocar pontos</h3>
         <div class="reward-grid" id="reward-grid"></div>
+        <h3 class="list-title">Meus cupons</h3>
+        <div id="coupon-list" class="coupon-list"></div>
         <div class="how-points">
-          <strong style="font-size:13.5px;">Como funciona o cashback</strong>
+          <strong style="font-size:13.5px;">Como funciona</strong>
           <ol>
-            <li>Você compra um remédio pelo Trifarmas e retira na farmácia parceira.</li>
-            <li>Quanto mais caro o produto, mais pontos você acumula.</li>
-            <li>Troque os pontos por desconto em compras futuras — sem afetar o preço da farmácia.</li>
+            <li>Cada <b>R$ 1</b> pago em um pedido vale <b>1 ponto</b>.</li>
+            <li>Os pontos entram no seu saldo quando você <b>confirma a retirada</b> do pedido.</li>
+            <li>Troque os pontos por cupons e escolha o cupom na tela de pagamento.</li>
           </ol>
         </div>
+        <h3 class="list-title">Extrato</h3>
+        <div id="points-history" class="points-history"></div>
       </section>
 
       <!-- ---- CONFIGURAÇÕES ---- -->
@@ -196,20 +224,23 @@
         <div class="section-head settings-head"><h2>Configurações</h2><p>Gerencie seus dados e preferências.</p></div>
         <div class="settings-card">
           <div class="profile-row">
-            <img id="settings-avatar" class="avatar-preview" src="" alt="">
-            <label class="btn-outline-sm" style="cursor:pointer; display:inline-block;">Trocar foto
-              <input type="file" accept="image/*" class="hidden" onchange="previewAvatar(this,'settings-avatar', true)">
-            </label>
+            <img id="settings-avatar" class="avatar-preview" src="" alt="" referrerpolicy="no-referrer">
+            <div class="profile-photo-actions">
+              <label class="btn-outline-sm" style="cursor:pointer; display:inline-block;">Trocar foto
+                <input type="file" accept="image/*" class="hidden" onchange="pickSettingsAvatar(this)">
+              </label>
+              <button id="reset-google-photo" class="btn-outline-sm hidden" onclick="resetGooglePhoto()">Usar foto do Google</button>
+            </div>
           </div>
-          <div class="field"><label>Nome</label><input id="settings-name" type="text"></div>
-          <div class="field"><label>E-mail</label><input id="settings-email" type="email"></div>
+          <div class="field"><label for="settings-name">Nome</label><input id="settings-name" type="text" autocomplete="name"></div>
+          <div class="field"><label for="settings-email">E-mail</label><input id="settings-email" type="email" autocomplete="email"></div>
 
           <div id="settings-pass-error" class="auth-error hidden"></div>
           <div id="settings-pass-section">
             <div class="pass-divider">Alterar senha</div>
-            <div class="field"><label>Senha atual</label><input id="settings-pass-current" type="password" placeholder="Confirme sua senha atual"></div>
-            <div class="field"><label>Nova senha</label><input id="settings-pass" type="password" placeholder="Deixe em branco para não alterar"></div>
-            <div class="field"><label>Confirmar nova senha</label><input id="settings-pass-confirm" type="password" placeholder="Repita a nova senha"></div>
+            <div class="field"><label for="settings-pass-current">Senha atual</label><input id="settings-pass-current" type="password" autocomplete="current-password" placeholder="Confirme sua senha atual"></div>
+            <div class="field"><label for="settings-pass">Nova senha</label><input id="settings-pass" type="password" autocomplete="new-password" placeholder="Deixe em branco para não alterar"></div>
+            <div class="field"><label for="settings-pass-confirm">Confirmar nova senha</label><input id="settings-pass-confirm" type="password" autocomplete="new-password" placeholder="Repita a nova senha"></div>
           </div>
           <div id="settings-pass-google-note" class="google-account-note hidden">
             <svg viewBox="0 0 48 48" width="16" height="16"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.6 29.3 35.5 24 35.5c-6.4 0-11.7-4.6-12.8-10.8-.2-1-.2-2 0-3C12.3 15.6 17.6 11 24 11c3.1 0 5.9 1.2 8 3.1l6-6C34.6 4.9 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.2-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.7 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l6-6C34.6 6.9 29.6 5 24 5c-7.6 0-14.1 4.3-17.7 10.7z"/><path fill="#4CAF50" d="M24 45c5.5 0 10.4-1.8 14.2-4.9l-6.6-5.5C29.6 36.4 26.9 37.5 24 37.5c-5.3 0-9.7-2.9-11.3-7.4l-6.6 5.1C9.7 41 16.3 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l6.6 5.5C38.9 40.8 45 35.5 45 24c0-1.2-.1-2.3-.4-3.5z"/></svg>
@@ -222,11 +253,11 @@
           <h3>Preferências</h3>
           <div class="toggle-row">
             <div><p>Modo escuro</p><span>Reduz o brilho da tela</span></div>
-            <button class="switch" id="settings-theme-switch" onclick="toggleTheme()"></button>
+            <button class="switch" id="settings-theme-switch" onclick="toggleTheme()" aria-label="Modo escuro"></button>
           </div>
           <div class="toggle-row">
             <div><p>Notificações de lembrete</p><span>Avisos de horário do remédio</span></div>
-            <button class="switch on" id="settings-notif-switch" onclick="this.classList.toggle('on')"></button>
+            <button class="switch on" id="settings-notif-switch" onclick="this.classList.toggle('on')" aria-label="Notificações"></button>
           </div>
         </div>
         <div class="settings-card">
@@ -238,13 +269,23 @@
     </div>
   </div>
 
+  <button id="cart-bar" class="cart-bar hidden" onclick="openCart()">
+    <span class="cart-bar-count" id="cart-bar-count">0</span>
+    <span class="cart-bar-label">Ver carrinho</span>
+    <span class="cart-bar-total" id="cart-bar-total">R$ 0,00</span>
+  </button>
+
   <div class="bottom-nav" id="bottom-nav"></div>
 </div>
 
-<div id="toast" class="toast"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script src="config.js"></script>
 <script src="api.js"></script>
 <script src="app.js"></script>
+<script src="location.js"></script>
+<script src="cart.js"></script>
+<script src="orders.js"></script>
+<script>initApp();</script>
 </body>
 </html>

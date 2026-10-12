@@ -12,9 +12,25 @@ lembretes, fotos de perfil e o catálogo (farmácias, remédios, recompensas)
 ficam no banco PostgreSQL, acessado apenas pelo backend.
 
 ```
-frontend/  index.html · styles.css · app.js · api.js · config.js · assets/ · vercel.json
-backend/   src/ (server, rotas, auth, db) · db/schema.sql · db/seed.js · render.yaml · .env.example
+frontend/  index.html · styles.css · config.js · api.js
+           app.js (login, busca, pontos, perfil) · cart.js (carrinho e pagamento)
+           orders.js (pedidos e receitas) · location.js (mapa e localização) · assets/ · vercel.json
+backend/   src/ (server, rotas, auth, pontos) · db/schema.sql · db/catalog.js · db/seed.js · render.yaml
 ```
+
+## Atualizando uma versão já publicada
+- O banco é atualizado sozinho ao reiniciar a API: as novas tabelas e colunas são criadas
+  sem apagar usuários, pedidos ou lembretes, e o catálogo de remédios é atualizado.
+- Se trocar o Client ID do Google, troque em **dois lugares**: `frontend/config.js` e a variável
+  `GOOGLE_CLIENT_ID` no Render. Adicione a URL do Vercel nas *Origens JavaScript autorizadas* do novo Client ID.
+
+## Regras de pontos
+- 1 ponto para cada R$ 1 pago, creditado quando o usuário confirma a retirada.
+- 50 pontos de bônus ao criar a conta.
+- Pontos são trocados por cupons (aba Pontos) e o cupom é escolhido na tela de pagamento.
+
+## Serviços externos usados no navegador (gratuitos, sem chave)
+- Mapa: Leaflet + OpenStreetMap. Farmácias próximas: Overpass API. Endereço: Nominatim e ViaCEP.
 
 ## 1. Publicar o backend no Render
 

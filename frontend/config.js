@@ -7,6 +7,6 @@ window.TRIFARMAS_CONFIG = {
     : 'https://trifarmast.onrender.com',
 
   // Client ID do Google (Google Cloud Console > Credenciais > ID do cliente OAuth 2.0).
-  // Lembre de adicionar a URL do Vercel em "Origens JavaScript autorizadas".
-  GOOGLE_CLIENT_ID: '926034754304-3445g4kqdp62m6ukdda14t17ebml1v3s.apps.googleusercontent.com',
+  // Precisa ser o mesmo valor da variável GOOGLE_CLIENT_ID no Render.
+  GOOGLE_CLIENT_ID: '798411665059-b1fhn4gfljnsi3efm3o9lacudd11a4f2.apps.googleusercontent.com',
 };
