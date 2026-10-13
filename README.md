@@ -26,7 +26,7 @@ backend/   src/ (server, rotas, auth, pontos, geo) · db/schema.sql · db/catalo
 
 ## Regras de pontos
 - 1 ponto para cada R$ 1 pago, creditado quando o usuário confirma a retirada.
-- 50 pontos de bônus ao criar a conta.
+- Contas novas começam com 0 pontos (sem bônus de cadastro).
 - Pontos são trocados por cupons (aba Pontos) e o cupom é escolhido na tela de pagamento.
 
 ## Mapa e localização

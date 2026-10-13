@@ -254,7 +254,7 @@ async function handleGoogleCredential(response){
     const session = await api.googleLogin(response.credential);
     const firstName = session.user.name.split(' ')[0];
     showToast(session.isNewUser
-      ? 'Conta Google conectada! Você ganhou 50 pontos de boas-vindas.'
+      ? 'Conta Google conectada! Bem-vindo(a) ao Trifarmas.'
       : `Login com Google realizado! Bem-vindo(a) de volta, ${firstName}.`);
     await enterApp(session);
   }catch(e){
@@ -299,7 +299,7 @@ async function doSignup(){
   if(!name || !email || !password){ showToast('Preencha todos os campos.'); return; }
   try{
     const session = await api.signup({ name, email, password });
-    showToast('Conta criada! Você ganhou 50 pontos de boas-vindas.');
+    showToast('Conta criada! Bem-vindo(a) ao Trifarmas.');
     await enterApp(session);
   }catch(e){
     showToast(e.message);
@@ -309,6 +309,8 @@ async function doSignup(){
 function doLogout(){
   api.setToken(null);
   stopOrderTimers();
+  if(typeof stopRefining === 'function') stopRefining();
+  loc.manualAddress = false;
   if(reminderCheckInterval){ clearInterval(reminderCheckInterval); reminderCheckInterval=null; }
   closeCheckout();
   state.user = null;

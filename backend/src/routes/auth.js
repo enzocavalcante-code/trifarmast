@@ -5,7 +5,6 @@ const { query, transaction } = require('../db');
 const { hashPassword, checkPassword, signToken } = require('../auth');
 const { HttpError, asyncHandler } = require('../errors');
 const { isValidAvatar } = require('../images');
-const { WELCOME_BONUS, addPoints } = require('../points');
 const serialize = require('../serializers');
 
 const router = express.Router();
@@ -39,7 +38,6 @@ async function createUser(client, { name, email, passwordHash = null, googleAcco
      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
     [name, email, passwordHash, googleAccount, avatar, avatarCustom, googlePicture]
   );
-  user.points = await addPoints(client, user.id, WELCOME_BONUS, 'Bônus de boas-vindas');
   return user;
 }
 
