@@ -6,6 +6,8 @@ const { requireAuth } = require('./auth');
 const { HttpError } = require('./errors');
 
 const app = express();
+// O Render fica na frente da API: confia no cabeçalho X-Forwarded-For para saber o IP real do usuário.
+app.set('trust proxy', true);
 
 app.use(cors({
   // Sem CORS_ORIGINS configurado, libera qualquer origem (útil em desenvolvimento).

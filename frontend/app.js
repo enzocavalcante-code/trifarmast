@@ -107,6 +107,7 @@ function showView(name){
   $('view-login').classList.toggle('hidden', name!=='login');
   $('view-signup').classList.toggle('hidden', name!=='signup');
   $('login-error').classList.add('hidden');
+  renderGoogleButtons();
 }
 
 /* ---------------- catálogo (vem do banco) ---------------- */
@@ -223,12 +224,24 @@ function initGoogleSignIn(){
   $('google-btn-login').classList.remove('hidden');
   $('google-btn-signup').classList.remove('hidden');
 
-  const width = Math.min(320, Math.max(220, $('view-login').clientWidth - 100));
-  const buttonOptions = { type:'standard', theme:'outline', size:'large', shape:'pill', width, logo_alignment:'left' };
+  googleSignInReady = true;
+  renderGoogleButtons();
+}
+
+/* Botão oficial do Google, com a mesma largura do botão "Entrar" e a cor do tema do app. */
+function renderGoogleButtons(){
+  if(!googleSignInReady) return;
+  const card = document.querySelector('#view-login:not(.hidden) .auth-card, #view-signup:not(.hidden) .auth-card');
+  const inner = card ? card.clientWidth - parseFloat(getComputedStyle(card).paddingLeft) * 2 : 320;
+  const width = Math.round(Math.min(400, Math.max(200, inner)));
+  const buttonOptions = {
+    type:'standard', size:'large', shape:'pill', width, logo_alignment:'center',
+    theme: state.theme === 'dark' ? 'filled_black' : 'outline',
+  };
+  $('google-btn-login').innerHTML = '';
+  $('google-btn-signup').innerHTML = '';
   google.accounts.id.renderButton($('google-btn-login'), { ...buttonOptions, text:'signin_with' });
   google.accounts.id.renderButton($('google-btn-signup'), { ...buttonOptions, text:'signup_with' });
-
-  googleSignInReady = true;
 }
 
 /* O Google devolve um ID Token (JWT) assinado. Ele é enviado ao backend,
@@ -405,6 +418,7 @@ function applyTheme(theme){
   state.theme = theme;
   document.body.setAttribute('data-theme', theme);
   $('settings-theme-switch').classList.toggle('on', theme==='dark');
+  renderGoogleButtons();
   $('theme-icon').innerHTML = theme==='dark'
     ? '<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>'
     : '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
@@ -883,6 +897,12 @@ function showModal(iconSvg, title, bodyHtml, buttons = [{ label:'Entendi', prima
 }
 
 /* ---------------- inicialização ---------------- */
+
+let googleResizeTimer = null;
+window.addEventListener('resize', ()=>{
+  clearTimeout(googleResizeTimer);
+  googleResizeTimer = setTimeout(()=>{ if(!state.user) renderGoogleButtons(); }, 250);
+});
 
 function initApp(){
   applyLogo();

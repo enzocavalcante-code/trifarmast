@@ -43,4 +43,17 @@ router.get('/search', asyncHandler(async (req, res) => {
   res.json(place);
 }));
 
+// Localização aproximada pela conexão de internet (quando o GPS não está disponível).
+router.get('/approximate', asyncHandler(async (req, res) => {
+  const ip = String(req.ip || '').replace(/^::ffff:/, '');
+  let place = null;
+  try {
+    place = await geo.approximateLocation(ip);
+  } catch (err) {
+    console.error('Localização por IP falhou:', err.message);
+  }
+  if (!place) throw new HttpError(404, 'Não foi possível estimar sua localização pela internet. Digite seu endereço ou CEP.');
+  res.json(place);
+}));
+
 module.exports = router;

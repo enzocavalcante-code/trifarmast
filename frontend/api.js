@@ -62,6 +62,7 @@ const api = (() => {
     nearbyPharmacies: (lat, lng) => get(`/places/pharmacies?lat=${lat}&lng=${lng}`),
     reverseGeocode: (lat, lng) => get(`/places/reverse?lat=${lat}&lng=${lng}`),
     geocode: q => get(`/places/search?q=${encodeURIComponent(q)}`),
+    approximateLocation: () => get('/places/approximate'),
 
     // Pontos
     points: () => get('/points'),

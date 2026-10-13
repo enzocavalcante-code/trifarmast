@@ -31,6 +31,7 @@ const loc = {
   pharmacies: [],        // farmácias reais ao redor, ordenadas por distância
   pharmaciesStatus: 'idle', // idle | loading | done | error
   pharmaciesError: '',
+  gpsError: '',
   chainMatches: {},      // { p1: { km, street, lat, lng }, ... }
   requestId: 0,
   locating: false,
@@ -66,7 +67,10 @@ const googleMapsSearchUrl = c => `https://www.google.com/maps/search/farm%C3%A1c
 function pharmacyDistance(pharm){
   if(!loc.coords) return { km: pharm.dist, label: 'Ative a localização para ver a distância' };
   const match = loc.chainMatches[pharm.id];
-  if(match) return { km: match.km, label: `${formatKm(match.km)} de você${match.street ? ' · ' + escapeHtml(match.street) : ''}`, match };
+  if(match){
+    const dist = loc.source === 'ip' ? `~${formatKm(match.km)} (aprox.)` : `${formatKm(match.km)} de você`;
+    return { km: match.km, label: `${dist}${match.street ? ' · ' + escapeHtml(match.street) : ''}`, match };
+  }
   if(loc.pharmaciesStatus === 'loading') return { km: Infinity, label: 'Calculando distância…' };
   if(loc.pharmaciesStatus === 'error') return { km: Infinity, label: 'Distância indisponível no momento' };
   return { km: Infinity, label: `Nenhuma loja num raio de ${radiusLabel()}` };
@@ -97,24 +101,25 @@ async function permissionState(){
   return 'prompt';
 }
 
+// Motivo curto de o GPS não ter funcionado (o texto de "o que fazer" é montado em quem exibe).
 function geolocationErrorMessage(err){
-  if(!window.isSecureContext) return 'A localização do aparelho só funciona em sites com https. Digite seu endereço ou CEP acima.';
-  if(err && err.code === 1) return '<b>Localização bloqueada.</b> Toque no cadeado ao lado do endereço do site e permita "Localização", ou digite seu endereço/CEP acima.';
-  if(err && err.code === 3) return 'Não foi possível obter a localização a tempo. Tente de novo ou digite seu endereço/CEP acima.';
-  return 'Não foi possível obter sua localização. Verifique se a localização do aparelho está ligada ou digite seu endereço/CEP acima.';
+  if(!window.isSecureContext) return 'A localização do aparelho só funciona em sites com https.';
+  if(err && err.code === 1) return 'A localização está bloqueada no navegador (libere no cadeado ao lado do endereço do site).';
+  if(err && err.code === 3) return 'O GPS demorou demais para responder.';
+  return 'Não foi possível usar o GPS do aparelho.';
 }
 
 async function requestMapLocation(userInitiated = false){
   if(loc.locating) return;
   if(!('geolocation' in navigator)){
-    setLocStatus('Seu navegador não oferece localização. Digite seu endereço ou CEP acima.', 'warn');
-    return;
+    loc.gpsError = 'Seu navegador não oferece localização.';
+    return useApproximateLocation();
   }
-  if(await permissionState() === 'denied'){
-    setLocStatus(geolocationErrorMessage({ code: 1 }), 'warn');
-    if(userInitiated && state.activeTab !== 'map') showToast('A localização está bloqueada no navegador. Libere ou digite seu CEP na aba Mapa.');
-    if(!loc.coords) showMapAt(DEFAULT_CENTER, 12);
-    return;
+  // Automático (sem clique): se o navegador já informa bloqueio, nem tenta o GPS.
+  // Com clique no botão, tenta sempre — alguns navegadores informam "bloqueado" sem estar.
+  if(!userInitiated && await permissionState() === 'denied'){
+    loc.gpsError = geolocationErrorMessage({ code: 1 });
+    return useApproximateLocation();
   }
   loc.locating = true;
   setGpsButtonBusy(true);
@@ -123,6 +128,7 @@ async function requestMapLocation(userInitiated = false){
     const pos = await getBestPosition();
     loc.locating = false;
     setGpsButtonBusy(false);
+    loc.gpsError = '';
     $('loc-input').value = '';
     await setLocation({
       lat: pos.coords.latitude,
@@ -134,8 +140,22 @@ async function requestMapLocation(userInitiated = false){
   }catch(err){
     loc.locating = false;
     setGpsButtonBusy(false);
-    setLocStatus(geolocationErrorMessage(err), 'warn');
-    if(userInitiated && state.activeTab !== 'map') showToast('Não foi possível obter sua localização. Tente pela aba Mapa, digitando o CEP.');
+    loc.gpsError = geolocationErrorMessage(err);
+    if(userInitiated && state.activeTab !== 'map') showToast('Não foi possível usar o GPS. Usando sua localização aproximada.');
+    if(!loc.coords || loc.source === 'ip') await useApproximateLocation();
+    else setLocStatus(`${loc.gpsError} Digite seu endereço ou CEP acima.`, 'warn');
+  }
+}
+
+// Sem GPS: estima a localização pela conexão de internet (nível de bairro/cidade),
+// para o mapa já mostrar farmácias. A pessoa pode refinar digitando o CEP.
+async function useApproximateLocation(){
+  setLocStatus('<span class="spinner"></span> Buscando sua localização aproximada…');
+  try{
+    const place = await api.approximateLocation();
+    await setLocation({ lat: place.lat, lng: place.lng, source: 'ip', address: place.label });
+  }catch{
+    setLocStatus(`${loc.gpsError || ''} Digite seu endereço ou CEP acima para ver as farmácias.`.trim(), 'warn');
     if(!loc.coords) showMapAt(DEFAULT_CENTER, 12);
   }
 }
@@ -170,7 +190,7 @@ async function setLocation({ lat, lng, accuracy = null, source, address = '' }, 
 
   updateLocationStatus();
   updateLocationHint();
-  showMapAt(loc.coords, 15);
+  showMapAt(loc.coords, source === 'ip' ? 13 : 15);
   refreshDistanceViews();
 
   if(!address){
@@ -199,6 +219,11 @@ function updateLocationStatus(){
   const precision = loc.source === 'gps' && loc.accuracy
     ? ` <span class="loc-precision">precisão de ~${loc.accuracy < 1000 ? Math.round(loc.accuracy) + ' m' : formatKm(loc.accuracy / 1000)}</span>`
     : '';
+  if(loc.source === 'ip'){
+    setLocStatus(`<span>Localização aproximada pela sua internet: <b>${where}</b>.</span>
+      <span class="loc-tip">${loc.gpsError ? loc.gpsError + ' ' : ''}Para mais precisão, digite seu CEP acima.</span>`, 'info');
+    return;
+  }
   const prefix = loc.source === 'gps' ? 'Você está em' : 'Mostrando farmácias perto de';
   setLocStatus(`${prefix}: <b>${where}</b>${precision}`, 'ok');
 }
@@ -302,14 +327,15 @@ function initMap(){
 function ensureMap(){
   if(leafletMap || !window.L || $('tab-map').classList.contains('hidden')) return;
   leafletMap = L.map('leaflet-map', { zoomControl: true, scrollWheelZoom: false, tap: true });
-  // Imagens do mapa: CARTO (principal) e OpenStreetMap (reserva, se várias imagens falharem).
-  const attribution = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
-  let tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd', attribution }).addTo(leafletMap);
+  // Imagens do mapa: OpenStreetMap (gratuito, sem chave). Se várias imagens falharem,
+  // troca para o servidor do OpenStreetMap França (estilo Humanitarian).
+  const osmAttribution = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+  let tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: osmAttribution }).addTo(leafletMap);
   let tileErrors = 0;
   tiles.on('tileerror', ()=>{
     if(++tileErrors !== 4) return;
     leafletMap.removeLayer(tiles);
-    tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(leafletMap);
+    tiles = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', { maxZoom: 19, subdomains: 'abc', attribution: osmAttribution }).addTo(leafletMap);
   });
   mapLayers = L.layerGroup().addTo(leafletMap);
   leafletMap.setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 12);

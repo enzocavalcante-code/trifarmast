@@ -30,7 +30,8 @@ backend/   src/ (server, rotas, auth, pontos, geo) · db/schema.sql · db/catalo
 - Pontos são trocados por cupons (aba Pontos) e o cupom é escolhido na tela de pagamento.
 
 ## Mapa e localização
-- Imagens do mapa (no navegador): Leaflet + CARTO, com OpenStreetMap de reserva.
+- Imagens do mapa (no navegador): Leaflet + OpenStreetMap (reserva: OpenStreetMap França).
+- Sem GPS (bloqueado ou indisponível), a API estima a localização pela internet (`/api/places/approximate`: ipwho.is, freeipapi, ipapi.co).
 - Farmácias próximas e busca de endereço/CEP são feitas pela API (`/api/places`, arquivo `backend/src/geo.js`):
   tenta vários servidores Overpass, depois o Nominatim; endereço via ViaCEP, Nominatim e Photon.
   Os resultados ficam em cache por 30 minutos. Todos são gratuitos e não precisam de chave.

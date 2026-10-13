@@ -222,4 +222,48 @@ async function geocode(text) {
   });
 }
 
-module.exports = { nearbyPharmacies, reverseGeocode, geocode };
+/* ---------------- localização aproximada pela internet (IP) ---------------- */
+
+// Usada quando o GPS do aparelho está bloqueado ou indisponível. Precisão de bairro/cidade.
+function isPublicIp(ip) {
+  if (!ip) return false;
+  if (/^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(ip)) return false;
+  if (/^(::1$|fc|fd|fe80)/i.test(ip)) return false;
+  return /^[\d.]+$/.test(ip) || /^[0-9a-f:]+$/i.test(ip);
+}
+
+async function approximateLocation(ip) {
+  if (!isPublicIp(ip)) return null;
+  return cached(`ip:${ip}`, 6 * 60 * 60 * 1000, async () => {
+    const providers = [
+      async () => {
+        const d = await fetchJson(`https://ipwho.is/${ip}?lang=pt-BR`, { timeoutMs: 6000 });
+        return d.success && { lat: d.latitude, lng: d.longitude, city: d.city, region: d.region_code || d.region, country: d.country_code };
+      },
+      async () => {
+        const d = await fetchJson(`https://freeipapi.com/api/json/${ip}`, { timeoutMs: 6000 });
+        return d.latitude && { lat: d.latitude, lng: d.longitude, city: d.cityName, region: d.regionName, country: d.countryCode };
+      },
+      async () => {
+        const d = await fetchJson(`https://ipapi.co/${ip}/json/`, { timeoutMs: 6000 });
+        return d.latitude && { lat: d.latitude, lng: d.longitude, city: d.city, region: d.region_code || d.region, country: d.country_code };
+      },
+    ];
+    for (const provider of providers) {
+      try {
+        const found = await provider();
+        if (found && Number.isFinite(Number(found.lat)) && Number.isFinite(Number(found.lng))) {
+          return {
+            lat: Number(found.lat),
+            lng: Number(found.lng),
+            label: [found.city, found.region].filter(Boolean).join(', '),
+            country: found.country || '',
+          };
+        }
+      } catch { /* tenta o próximo serviço */ }
+    }
+    throw new Error('Serviços de localização por IP indisponíveis');
+  });
+}
+
+module.exports = { nearbyPharmacies, reverseGeocode, geocode, approximateLocation };
