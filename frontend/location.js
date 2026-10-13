@@ -1,17 +1,16 @@
 /* =============================================================
    Localização e mapa
-   - GPS do aparelho (com nova tentativa em modo de menor precisão)
-   - Busca por endereço ou CEP (ViaCEP + OpenStreetMap/Nominatim)
-   - Farmácias reais ao redor (OpenStreetMap/Overpass) no mapa (Leaflet)
+   - Localização atual do aparelho (GPS / Wi-Fi), com nova tentativa
+   - Busca por endereço ou CEP
+   - Farmácias reais ao redor no mapa (Leaflet + OpenStreetMap)
    - Distância real até a loja mais próxima de cada rede parceira
+   As buscas de farmácias e endereços passam pela API do Trifarmas (Render),
+   que tenta vários servidores de mapas e guarda os resultados em cache.
    ============================================================= */
 
 const LOCATION_STORAGE_KEY = 'trifarmas-location';
 const LOCATION_MAX_AGE_MS = 6 * 60 * 60 * 1000; // reaproveita a última localização por 6h
 const DEFAULT_CENTER = { lat: -23.5505, lng: -46.6333 }; // São Paulo (usado só no mapa, sem localização)
-const SEARCH_RADII_M = [3000, 8000];   // raio da lista de farmácias (amplia se houver poucas)
-const CHAIN_RADIUS_M = 10000;           // raio para achar a loja mais próxima de cada rede parceira
-const OVERPASS_ENDPOINTS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 
 // Como cada rede parceira aparece no OpenStreetMap (nome ou marca).
 const CHAIN_KEYWORDS = {
@@ -28,11 +27,13 @@ const loc = {
   accuracy: null,        // metros (GPS)
   source: null,          // 'gps' | 'address'
   address: '',
-  radiusKm: SEARCH_RADII_M[SEARCH_RADII_M.length - 1] / 1000,
+  radiusKm: 4,
   pharmacies: [],        // farmácias reais ao redor, ordenadas por distância
   pharmaciesStatus: 'idle', // idle | loading | done | error
+  pharmaciesError: '',
   chainMatches: {},      // { p1: { km, street, lat, lng }, ... }
   requestId: 0,
+  locating: false,
 };
 
 let leafletMap = null;
@@ -50,18 +51,6 @@ function haversineKm(a, b){
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-async function fetchJson(url, { timeoutMs = 15000, ...options } = {}){
-  const controller = new AbortController();
-  const timer = setTimeout(()=> controller.abort(), timeoutMs);
-  try{
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  }finally{
-    clearTimeout(timer);
-  }
-}
-
 function setLocStatus(text, tone = ''){
   const el = $('loc-status');
   if(!el) return;
@@ -71,6 +60,7 @@ function setLocStatus(text, tone = ''){
 
 const radiusLabel = () => `${String(loc.radiusKm).replace('.', ',')} km`;
 const directionsUrl = (lat, lng) => `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+const googleMapsSearchUrl = c => `https://www.google.com/maps/search/farm%C3%A1cia/@${c.lat},${c.lng},15z`;
 
 /* Distância exibida nos cards de busca, carrinho e pagamento. */
 function pharmacyDistance(pharm){
@@ -79,40 +69,61 @@ function pharmacyDistance(pharm){
   if(match) return { km: match.km, label: `${formatKm(match.km)} de você${match.street ? ' · ' + escapeHtml(match.street) : ''}`, match };
   if(loc.pharmaciesStatus === 'loading') return { km: Infinity, label: 'Calculando distância…' };
   if(loc.pharmaciesStatus === 'error') return { km: Infinity, label: 'Distância indisponível no momento' };
-  return { km: Infinity, label: `Nenhuma loja num raio de ${CHAIN_RADIUS_M / 1000} km` };
+  return { km: Infinity, label: `Nenhuma loja num raio de ${radiusLabel()}` };
 }
 
-/* ---------------- obter localização ---------------- */
+/* ---------------- localização do aparelho ---------------- */
 
 function getPosition(options){
   return new Promise((resolve, reject)=> navigator.geolocation.getCurrentPosition(resolve, reject, options));
 }
 
-// Tenta GPS preciso; se demorar ou falhar, tenta de novo com a localização aproximada (Wi-Fi/rede).
+// 1ª tentativa: GPS preciso (aceita uma leitura de até 1 min atrás).
+// 2ª tentativa: localização aproximada por Wi-Fi/rede, que costuma funcionar em computadores.
 async function getBestPosition(){
   try{
-    return await getPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+    return await getPosition({ enableHighAccuracy: true, timeout: 9000, maximumAge: 60 * 1000 });
   }catch(err){
     if(err.code === 1) throw err; // permissão negada: não adianta tentar de novo
-    return getPosition({ enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000 });
+    setLocStatus('<span class="spinner"></span> GPS sem sinal, tentando localização aproximada…');
+    return getPosition({ enableHighAccuracy: false, timeout: 12000, maximumAge: 10 * 60 * 1000 });
   }
 }
 
+async function permissionState(){
+  try{
+    if(navigator.permissions) return (await navigator.permissions.query({ name: 'geolocation' })).state;
+  }catch{ /* navegador sem Permissions API */ }
+  return 'prompt';
+}
+
 function geolocationErrorMessage(err){
-  if(!window.isSecureContext) return 'A localização só funciona em sites com https. Digite seu endereço ou CEP acima.';
-  if(err && err.code === 1) return 'Você não permitiu o acesso à localização. Libere nas configurações do navegador (ícone de cadeado ao lado do endereço do site) ou digite seu endereço/CEP acima.';
-  if(err && err.code === 3) return 'Não foi possível obter a localização a tempo. Tente de novo em um local aberto ou digite seu endereço/CEP.';
-  return 'Não foi possível obter sua localização. Verifique se o GPS está ligado ou digite seu endereço/CEP acima.';
+  if(!window.isSecureContext) return 'A localização do aparelho só funciona em sites com https. Digite seu endereço ou CEP acima.';
+  if(err && err.code === 1) return '<b>Localização bloqueada.</b> Toque no cadeado ao lado do endereço do site e permita "Localização", ou digite seu endereço/CEP acima.';
+  if(err && err.code === 3) return 'Não foi possível obter a localização a tempo. Tente de novo ou digite seu endereço/CEP acima.';
+  return 'Não foi possível obter sua localização. Verifique se a localização do aparelho está ligada ou digite seu endereço/CEP acima.';
 }
 
 async function requestMapLocation(userInitiated = false){
+  if(loc.locating) return;
   if(!('geolocation' in navigator)){
     setLocStatus('Seu navegador não oferece localização. Digite seu endereço ou CEP acima.', 'warn');
     return;
   }
-  setLocStatus('<span class="spinner"></span> Obtendo sua localização…');
+  if(await permissionState() === 'denied'){
+    setLocStatus(geolocationErrorMessage({ code: 1 }), 'warn');
+    if(userInitiated && state.activeTab !== 'map') showToast('A localização está bloqueada no navegador. Libere ou digite seu CEP na aba Mapa.');
+    if(!loc.coords) showMapAt(DEFAULT_CENTER, 12);
+    return;
+  }
+  loc.locating = true;
+  setGpsButtonBusy(true);
+  setLocStatus('<span class="spinner"></span> Obtendo sua localização… se o navegador perguntar, toque em <b>Permitir</b>.');
   try{
     const pos = await getBestPosition();
+    loc.locating = false;
+    setGpsButtonBusy(false);
+    $('loc-input').value = '';
     await setLocation({
       lat: pos.coords.latitude,
       lng: pos.coords.longitude,
@@ -121,10 +132,17 @@ async function requestMapLocation(userInitiated = false){
     });
     if(userInitiated && state.activeTab !== 'map') showToast('Localização atualizada! Distâncias recalculadas.');
   }catch(err){
+    loc.locating = false;
+    setGpsButtonBusy(false);
     setLocStatus(geolocationErrorMessage(err), 'warn');
-    if(userInitiated && state.activeTab !== 'map') showToast('Não foi possível obter sua localização. Tente pelo Mapa, digitando o endereço.');
+    if(userInitiated && state.activeTab !== 'map') showToast('Não foi possível obter sua localização. Tente pela aba Mapa, digitando o CEP.');
     if(!loc.coords) showMapAt(DEFAULT_CENTER, 12);
   }
+}
+
+function setGpsButtonBusy(busy){
+  const btn = document.querySelector('.loc-gps');
+  if(btn) btn.disabled = busy;
 }
 
 // Ao entrar no app: reaproveita a última localização e, se a permissão
@@ -134,12 +152,9 @@ async function initLocationSilently(){
   if(saved && saved.coords && Date.now() - saved.savedAt < LOCATION_MAX_AGE_MS){
     setLocation({ ...saved.coords, accuracy: saved.accuracy, source: saved.source, address: saved.address }, { save: false });
   }
-  try{
-    if(navigator.permissions && 'geolocation' in navigator){
-      const perm = await navigator.permissions.query({ name: 'geolocation' });
-      if(perm.state === 'granted' && (!saved || saved.source === 'gps')) requestMapLocation(false);
-    }
-  }catch{ /* navegador sem Permissions API */ }
+  if('geolocation' in navigator && await permissionState() === 'granted' && (!saved || saved.source === 'gps')){
+    requestMapLocation(false);
+  }
   updateLocationHint();
 }
 
@@ -159,12 +174,12 @@ async function setLocation({ lat, lng, accuracy = null, source, address = '' }, 
   refreshDistanceViews();
 
   if(!address){
-    reverseGeocode(lat, lng).then(addr=>{
-      if(requestId !== loc.requestId || !addr) return;
-      loc.address = addr;
+    api.reverseGeocode(lat, lng).then(({ label })=>{
+      if(requestId !== loc.requestId || !label) return;
+      loc.address = label;
       updateLocationStatus();
       persistLocation();
-    });
+    }).catch(()=>{});
   }
   if(save) persistLocation();
 
@@ -180,7 +195,7 @@ function persistLocation(){
 
 function updateLocationStatus(){
   if(!loc.coords) return;
-  const where = loc.address ? escapeHtml(loc.address) : `${loc.coords.lat.toFixed(5)}, ${loc.coords.lng.toFixed(5)}`;
+  const where = loc.address ? escapeHtml(loc.address) : 'sua localização atual';
   const precision = loc.source === 'gps' && loc.accuracy
     ? ` <span class="loc-precision">precisão de ~${loc.accuracy < 1000 ? Math.round(loc.accuracy) + ' m' : formatKm(loc.accuracy / 1000)}</span>`
     : '';
@@ -198,7 +213,8 @@ function updateLocationHint(){
   hint.innerHTML = `
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
     <span>Ative sua localização para ver a distância real até cada farmácia.</span>
-    <button class="link-btn" onclick="requestMapLocation(true)">Ativar</button>`;
+    <button class="link-btn" onclick="requestMapLocation(true)">Ativar</button>
+    <button class="link-btn" onclick="switchTab('map'); setTimeout(()=>$('loc-input').focus(), 80)">Digitar CEP</button>`;
   hint.classList.remove('hidden');
 }
 
@@ -211,122 +227,54 @@ function refreshDistanceViews(){
 
 /* ---------------- endereço / CEP ---------------- */
 
-async function reverseGeocode(lat, lng){
-  try{
-    const data = await fetchJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=pt-BR`);
-    const a = data.address || {};
-    const street = [a.road, a.house_number].filter(Boolean).join(', ');
-    const area = a.suburb || a.neighbourhood || a.city_district || '';
-    const city = a.city || a.town || a.village || a.municipality || '';
-    return [street, area, city].filter(Boolean).join(' · ') || data.display_name || '';
-  }catch{
-    return '';
-  }
-}
-
 async function searchAddress(){
   const raw = $('loc-input').value.trim();
-  if(!raw){ $('loc-input').focus(); return; }
+  if(raw.length < 3){ $('loc-input').focus(); return; }
+  $('loc-input').blur(); // fecha o teclado no celular
   setLocStatus('<span class="spinner"></span> Procurando endereço…');
   try{
-    let queryText = raw;
-    let label = raw;
-    const cep = raw.replace(/\D/g, '');
-    if(/^\d{8}$/.test(cep)){
-      const via = await fetchJson(`https://viacep.com.br/ws/${cep}/json/`);
-      if(via.erro) throw new Error('CEP não encontrado.');
-      queryText = [via.logradouro, via.bairro, via.localidade, via.uf, 'Brasil'].filter(Boolean).join(', ');
-      label = [via.logradouro, via.bairro, `${via.localidade}/${via.uf}`].filter(Boolean).join(' · ');
-    }
-    const results = await fetchJson(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(queryText)}`);
-    if(!results.length) throw new Error('Endereço não encontrado. Tente incluir o bairro e a cidade.');
-    const place = results[0];
-    await setLocation({
-      lat: Number(place.lat),
-      lng: Number(place.lon),
-      source: 'address',
-      address: label === raw ? place.display_name.split(',').slice(0, 3).join(',') : label,
-    });
+    const place = await api.geocode(raw);
+    await setLocation({ lat: place.lat, lng: place.lng, source: 'address', address: place.label || raw });
   }catch(e){
-    setLocStatus(e.name === 'AbortError' ? 'A busca demorou demais. Tente novamente.' : (e.message.startsWith('HTTP') ? 'Não foi possível buscar o endereço agora. Tente novamente.' : e.message), 'warn');
+    setLocStatus(escapeHtml(e.message), 'warn');
   }
 }
 
 /* ---------------- farmácias reais ao redor ---------------- */
 
-// Uma consulta traz: todas as farmácias no raio próximo + lojas das redes parceiras
-// num raio maior (para calcular a distância até a loja mais próxima de cada rede).
-const CHAIN_REGEX = 'raia|drogasil|pacheco|pague ?menos|ultrafarma|panvel';
-
-async function queryOverpass(center, nearRadiusM){
-  const around = r => `(around:${r},${center.lat},${center.lng})`;
-  const query = `[out:json][timeout:25];
-(
-  nwr["amenity"="pharmacy"]${around(nearRadiusM)};
-  nwr["amenity"="pharmacy"]["name"~"${CHAIN_REGEX}",i]${around(CHAIN_RADIUS_M)};
-  nwr["amenity"="pharmacy"]["brand"~"${CHAIN_REGEX}",i]${around(CHAIN_RADIUS_M)};
-);
-out center tags 400;`;
-  let lastError;
-  for(const endpoint of OVERPASS_ENDPOINTS){
-    try{
-      const data = await fetchJson(`${endpoint}?data=${encodeURIComponent(query)}`, { timeoutMs: 25000 });
-      return data.elements || [];
-    }catch(err){
-      lastError = err;
-    }
-  }
-  throw lastError;
-}
-
-function toPharmacy(el, center){
-  const lat = el.lat ?? (el.center && el.center.lat);
-  const lng = el.lon ?? (el.center && el.center.lon);
-  if(lat == null || lng == null) return null;
-  const t = el.tags || {};
-  const name = t.name || t.brand || 'Farmácia';
-  const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(', ');
-  const searchable = normalizeText(`${t.name || ''} ${t.brand || ''} ${t.operator || ''}`);
-  const chainId = Object.keys(CHAIN_KEYWORDS).find(id => CHAIN_KEYWORDS[id].some(k => searchable.includes(k))) || null;
-  return {
-    id: `${el.type}/${el.id}`,
-    name,
-    street,
-    suburb: t['addr:suburb'] || '',
-    lat, lng,
-    km: haversineKm(center, { lat, lng }),
-    open24h: /24\/7/.test(t.opening_hours || ''),
-    chainId,
-  };
+function chainOf(p){
+  const searchable = normalizeText(`${p.name || ''} ${p.brand || ''}`);
+  return Object.keys(CHAIN_KEYWORDS).find(id => CHAIN_KEYWORDS[id].some(k => searchable.includes(k))) || null;
 }
 
 async function loadNearbyPharmacies(requestId){
   const center = loc.coords;
   try{
-    let all = [];
-    let near = [];
-    for(const radius of SEARCH_RADII_M){
-      const elements = await queryOverpass(center, radius);
-      const unique = new Map();
-      elements.map(el => toPharmacy(el, center)).filter(Boolean).forEach(p => unique.set(p.id, p));
-      all = [...unique.values()].sort((a, b) => a.km - b.km);
-      near = all.filter(p => p.km <= radius / 1000);
-      loc.radiusKm = radius / 1000;
-      if(near.length >= 5) break;
-    }
+    const data = await api.nearbyPharmacies(center.lat, center.lng);
     if(requestId !== loc.requestId) return;
-    loc.pharmacies = near;
+    loc.radiusKm = data.radiusKm;
+    loc.pharmacies = data.pharmacies
+      .map(p => ({ ...p, km: haversineKm(center, p), chainId: chainOf(p) }))
+      .sort((a, b) => a.km - b.km);
     loc.chainMatches = {};
-    for(const p of all){
+    for(const p of loc.pharmacies){
       if(p.chainId && !loc.chainMatches[p.chainId]) loc.chainMatches[p.chainId] = p;
     }
     loc.pharmaciesStatus = 'done';
-  }catch{
+  }catch(e){
     if(requestId !== loc.requestId) return;
     loc.pharmaciesStatus = 'error';
+    loc.pharmaciesError = e.message;
   }
   renderMapMarkers();
   refreshDistanceViews();
+}
+
+function retryPharmacies(){
+  if(!loc.coords) return;
+  loc.pharmaciesStatus = 'loading';
+  renderPharmacyList();
+  loadNearbyPharmacies(loc.requestId);
 }
 
 /* ---------------- mapa ---------------- */
@@ -353,11 +301,16 @@ function initMap(){
 
 function ensureMap(){
   if(leafletMap || !window.L || $('tab-map').classList.contains('hidden')) return;
-  leafletMap = L.map('leaflet-map', { zoomControl: true, scrollWheelZoom: false });
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
-  }).addTo(leafletMap);
+  leafletMap = L.map('leaflet-map', { zoomControl: true, scrollWheelZoom: false, tap: true });
+  // Imagens do mapa: CARTO (principal) e OpenStreetMap (reserva, se várias imagens falharem).
+  const attribution = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
+  let tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd', attribution }).addTo(leafletMap);
+  let tileErrors = 0;
+  tiles.on('tileerror', ()=>{
+    if(++tileErrors !== 4) return;
+    leafletMap.removeLayer(tiles);
+    tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(leafletMap);
+  });
   mapLayers = L.layerGroup().addTo(leafletMap);
   leafletMap.setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 12);
 }
@@ -441,17 +394,19 @@ function renderPharmacyList(){
     return;
   }
   if(loc.pharmaciesStatus === 'error'){
-    el.innerHTML = `<div class="empty-inline">Não foi possível carregar as farmácias agora.
-      <button class="link-btn" onclick="setLocation({...loc.coords, accuracy: loc.accuracy, source: loc.source, address: loc.address})">Tentar de novo</button> ·
-      <a class="link-btn" href="https://www.google.com/maps/search/farm%C3%A1cia/@${loc.coords.lat},${loc.coords.lng},15z" target="_blank" rel="noopener">Abrir no Google Maps</a></div>`;
+    el.innerHTML = `<div class="empty-inline">${escapeHtml(loc.pharmaciesError || 'Não foi possível carregar as farmácias agora.')}
+      <div class="inline-actions">
+        <button class="btn-outline-sm" onclick="retryPharmacies()">Tentar de novo</button>
+        <a class="btn-outline-sm" href="${googleMapsSearchUrl(loc.coords)}" target="_blank" rel="noopener">Ver no Google Maps</a>
+      </div></div>`;
     return;
   }
   if(!loc.pharmacies.length){
     el.innerHTML = `<div class="empty-inline">Nenhuma farmácia encontrada num raio de ${radiusLabel()}.
-      <a class="link-btn" href="https://www.google.com/maps/search/farm%C3%A1cia/@${loc.coords.lat},${loc.coords.lng},14z" target="_blank" rel="noopener">Procurar no Google Maps</a></div>`;
+      <a class="link-btn" href="${googleMapsSearchUrl(loc.coords)}" target="_blank" rel="noopener">Procurar no Google Maps</a></div>`;
     return;
   }
-  title.textContent = `${loc.pharmacies.length} farmácias num raio de ${radiusLabel()}`;
+  title.textContent = `Farmácias perto de você (${loc.pharmacies.length})`;
   el.innerHTML = loc.pharmacies.slice(0, 20).map(p=>`
     <div class="near-item">
       <button class="near-main" onclick="focusPharmacy('${p.id}')">

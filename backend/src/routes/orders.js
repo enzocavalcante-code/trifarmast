@@ -80,8 +80,8 @@ router.post('/', asyncHandler(async (req, res) => {
       `SELECT m.id, m.name, m.presentation, m.requires_prescription, mp.price
          FROM medicines m
          JOIN medicine_prices mp ON mp.medicine_id = m.id AND mp.pharmacy_id = $1
-        WHERE m.id = ANY($2::text[]) AND (m.owner_id IS NULL OR m.owner_id = $3)`,
-      [pharmacy.id, [...quantities.keys()], req.userId]
+        WHERE m.id = ANY($2::text[]) AND m.owner_id IS NULL`,
+      [pharmacy.id, [...quantities.keys()]]
     );
     if (meds.length !== quantities.size) throw new HttpError(404, 'Algum remédio do carrinho não está disponível nesta farmácia.');
 

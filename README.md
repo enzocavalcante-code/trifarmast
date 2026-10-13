@@ -15,7 +15,7 @@ ficam no banco PostgreSQL, acessado apenas pelo backend.
 frontend/  index.html · styles.css · config.js · api.js
            app.js (login, busca, pontos, perfil) · cart.js (carrinho e pagamento)
            orders.js (pedidos e receitas) · location.js (mapa e localização) · assets/ · vercel.json
-backend/   src/ (server, rotas, auth, pontos) · db/schema.sql · db/catalog.js · db/seed.js · render.yaml
+backend/   src/ (server, rotas, auth, pontos, geo) · db/schema.sql · db/catalog.js · db/seed.js · render.yaml
 ```
 
 ## Atualizando uma versão já publicada
@@ -29,8 +29,11 @@ backend/   src/ (server, rotas, auth, pontos) · db/schema.sql · db/catalog.js 
 - 50 pontos de bônus ao criar a conta.
 - Pontos são trocados por cupons (aba Pontos) e o cupom é escolhido na tela de pagamento.
 
-## Serviços externos usados no navegador (gratuitos, sem chave)
-- Mapa: Leaflet + OpenStreetMap. Farmácias próximas: Overpass API. Endereço: Nominatim e ViaCEP.
+## Mapa e localização
+- Imagens do mapa (no navegador): Leaflet + CARTO, com OpenStreetMap de reserva.
+- Farmácias próximas e busca de endereço/CEP são feitas pela API (`/api/places`, arquivo `backend/src/geo.js`):
+  tenta vários servidores Overpass, depois o Nominatim; endereço via ViaCEP, Nominatim e Photon.
+  Os resultados ficam em cache por 30 minutos. Todos são gratuitos e não precisam de chave.
 
 ## 1. Publicar o backend no Render
 

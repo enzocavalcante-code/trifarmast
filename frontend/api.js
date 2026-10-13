@@ -10,10 +10,14 @@ const api = (() => {
     if (token) headers.Authorization = `Bearer ${token}`;
 
     let res;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000); // a API gratuita pode levar ~50s para "acordar"
     try {
-      res = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      res = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal });
     } catch {
       throw new Error('Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.');
+    } finally {
+      clearTimeout(timer);
     }
     if (res.status === 204) return null;
     const data = await res.json().catch(() => ({}));
@@ -40,8 +44,6 @@ const api = (() => {
 
     // Catálogo
     catalog: () => get('/catalog'),
-    customMeds: () => get('/medicines/custom'),
-    addCustomMed: name => post('/medicines/custom', { name }),
 
     // Pedidos
     orders: () => get('/orders'),
@@ -55,6 +57,11 @@ const api = (() => {
     addReminder: data => post('/reminders', data),
     removeReminder: id => del(`/reminders/${id}`),
     markRemindersFired: ids => post('/reminders/fired', { ids }),
+
+    // Localização (farmácias próximas e endereços)
+    nearbyPharmacies: (lat, lng) => get(`/places/pharmacies?lat=${lat}&lng=${lng}`),
+    reverseGeocode: (lat, lng) => get(`/places/reverse?lat=${lat}&lng=${lng}`),
+    geocode: q => get(`/places/search?q=${encodeURIComponent(q)}`),
 
     // Pontos
     points: () => get('/points'),

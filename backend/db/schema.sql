@@ -148,3 +148,6 @@ CREATE INDEX IF NOT EXISTS reminders_user_idx ON reminders(user_id);
 -- Fotos enviadas manualmente antes da coluna avatar_custom existir continuam valendo.
 UPDATE users SET avatar_custom = TRUE
  WHERE avatar LIKE 'data:%' AND avatar_custom = FALSE AND google_picture IS NULL;
+
+-- O app não permite mais adicionar remédios fora do catálogo: remove os que foram criados antes.
+DELETE FROM medicines WHERE owner_id IS NOT NULL;

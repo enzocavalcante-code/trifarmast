@@ -38,7 +38,6 @@ const state = {
   calMonth: new Date().getMonth(),
   calYear: new Date().getFullYear(),
   calSelectedDay: new Date().getDate(),
-  customMeds: [], // remédios digitados pelo usuário que não estão no catálogo
   catalog: { pharmacies: [], medicines: [], rewards: [] },
   pointsInfo: { pending: 0, coupons: [], history: [] },
 };
@@ -122,7 +121,7 @@ async function loadCatalog(){
   }
 }
 
-const allMeds = () => [...state.catalog.medicines, ...state.customMeds];
+const allMeds = () => state.catalog.medicines;
 const medById = id => allMeds().find(m=>m.id===id);
 const pharmacyById = id => state.catalog.pharmacies.find(p=>p.id===id);
 const pharmacyLogo = pharm => `https://www.google.com/s2/favicons?domain=${pharm.domain}&sz=64`;
@@ -300,7 +299,6 @@ function doLogout(){
   state.user = null;
   state.orders = [];
   state.reminders = [];
-  state.customMeds = [];
   state.pointsInfo = { pending: 0, coupons: [], history: [] };
   $('app').classList.add('hidden');
   showView('login');
@@ -316,12 +314,11 @@ async function enterApp(session){
 
   // Carrega do banco os dados desta conta.
   try{
-    const [orders, reminders, customMeds, pointsInfo] = await Promise.all([
-      api.orders(), api.reminders(), api.customMeds(), api.points(),
+    const [orders, reminders, pointsInfo] = await Promise.all([
+      api.orders(), api.reminders(), api.points(),
     ]);
     setOrders(orders);
     state.reminders = reminders;
-    state.customMeds = customMeds;
     applyPointsInfo(pointsInfo);
   }catch(e){
     showToast(e.message);
@@ -412,6 +409,19 @@ function applyTheme(theme){
     ? '<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>'
     : '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
 }
+// Tamanho do texto: multiplica todas as fontes do app (variável CSS --fs). Fica salvo neste aparelho.
+const FONT_SCALES = [0.9, 1, 1.15, 1.3];
+function applyFontScale(scale){
+  const value = FONT_SCALES.includes(scale) ? scale : 1;
+  document.documentElement.style.setProperty('--fs', value);
+  document.querySelectorAll('#font-size-options button').forEach(b=>
+    b.setAttribute('aria-checked', String(Number(b.dataset.scale) === value)));
+}
+function setFontScale(scale){
+  applyFontScale(scale);
+  storage.set('trifarmas-font-scale', scale);
+}
+
 function toggleTheme(){
   applyTheme(state.theme==='light' ? 'dark' : 'light');
   storage.set('trifarmas-theme', state.theme);
@@ -421,7 +431,6 @@ function toggleTheme(){
 
 function buildChips(){
   const cats = ['Todos', ...new Set(state.catalog.medicines.map(m=>m.cat))];
-  if(state.customMeds.length) cats.push('Outros');
   $('chip-row').innerHTML = cats.map(c=>
     `<button class="chip ${c===state.activeCat?'active':''}" data-cat="${escapeHtml(c)}" onclick="setCat(this.dataset.cat)">${escapeHtml(c)}</button>`
   ).join('');
@@ -474,24 +483,14 @@ function renderResults(){
   if(meds.length===0){
     html += `<div class="empty-state">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-      <p>Nenhum remédio encontrado na nossa base ainda.</p>
+      <p>Nenhum remédio encontrado${rawQuery ? ` para "<strong>${escapeHtml(rawQuery)}</strong>"` : ''}.</p>
+      <span>Confira a escrita ou busque pelo princípio ativo (ex.: "dipirona", "losartana").</span>
     </div>`;
   } else {
     html += shown.map(renderMedCard).join('');
     if(meds.length > shown.length){
       html += `<button class="btn btn-ghost load-more" onclick="showMoreResults()">Mostrar mais (${meds.length - shown.length})</button>`;
     }
-  }
-
-  // Remédio fora da base: permite adicionar e comprar mesmo assim.
-  const q = normalizeText(rawQuery);
-  if(q && !meds.some(m=>normalizeText(m.name)===q)){
-    const safe = escapeHtml(rawQuery);
-    html += `
-    <div class="custom-med-card">
-      <p>Não encontrou "<strong>${safe}</strong>" na nossa lista? Você pode adicioná-lo e comprar mesmo assim, independente do preço.</p>
-      <button class="btn btn-primary" onclick="addCustomMed()">Adicionar "${safe}" e ver farmácias</button>
-    </div>`;
   }
 
   $('results-wrap').innerHTML = html;
@@ -565,20 +564,6 @@ function renderMedCard(med){
     </div>
     ${offers.length > 4 ? `<button class="link-more" onclick="toggleMedPharmacies('${med.id}')">${expanded ? 'Ver menos farmácias' : `Ver todas as ${offers.length} farmácias`}</button>` : ''}
   </article>`;
-}
-
-async function addCustomMed(){
-  const name = $('search-input').value.trim();
-  if(!name) return;
-  try{
-    const med = await api.addCustomMed(name);
-    state.customMeds.push(med);
-    buildChips();
-    renderResults();
-    showToast(`"${name}" adicionado! Escolha a farmácia que preferir.`);
-  }catch(e){
-    showToast(e.message);
-  }
 }
 
 /* ---------------- scanner ---------------- */
@@ -903,6 +888,7 @@ function initApp(){
   applyLogo();
   buildNav();
   applyTheme(storage.get('trifarmas-theme') === 'dark' ? 'dark' : 'light');
+  applyFontScale(Number(storage.get('trifarmas-font-scale')) || 1);
   showView('login');
   initGoogleSignIn();
   loadCatalog();

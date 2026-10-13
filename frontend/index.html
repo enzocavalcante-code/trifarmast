@@ -158,7 +158,7 @@
           <button class="btn btn-primary" onclick="mockCapture()">Capturar agora</button>
         </div>
         <div class="scanner-fallback">
-          <strong style="font-size:13px;">Sem câmera? Toque em um remédio:</strong>
+          <strong class="small-title">Sem câmera? Toque em um remédio:</strong>
           <div class="mock-list" id="scanner-mock-list"></div>
         </div>
       </section>
@@ -208,7 +208,7 @@
         <h3 class="list-title">Meus cupons</h3>
         <div id="coupon-list" class="coupon-list"></div>
         <div class="how-points">
-          <strong style="font-size:13.5px;">Como funciona</strong>
+          <strong class="small-title">Como funciona</strong>
           <ol>
             <li>Cada <b>R$ 1</b> pago em um pedido vale <b>1 ponto</b>.</li>
             <li>Os pontos entram no seu saldo quando você <b>confirma a retirada</b> do pedido.</li>
@@ -254,6 +254,17 @@
           <div class="toggle-row">
             <div><p>Modo escuro</p><span>Reduz o brilho da tela</span></div>
             <button class="switch" id="settings-theme-switch" onclick="toggleTheme()" aria-label="Modo escuro"></button>
+          </div>
+          <div class="pref-block">
+            <p>Tamanho do texto</p>
+            <span>Deixe as letras do app maiores ou menores</span>
+            <div class="segmented" id="font-size-options" role="radiogroup" aria-label="Tamanho do texto">
+              <button role="radio" data-scale="0.9" onclick="setFontScale(0.9)"><b style="font-size:13px">A</b><span>Pequeno</span></button>
+              <button role="radio" data-scale="1" onclick="setFontScale(1)"><b style="font-size:16px">A</b><span>Padrão</span></button>
+              <button role="radio" data-scale="1.15" onclick="setFontScale(1.15)"><b style="font-size:19px">A</b><span>Grande</span></button>
+              <button role="radio" data-scale="1.3" onclick="setFontScale(1.3)"><b style="font-size:22px">A</b><span>Muito grande</span></button>
+            </div>
+            <p class="font-preview">Prévia: <b>Dipirona Sódica 500mg</b> a partir de R$ 9,90</p>
           </div>
           <div class="toggle-row">
             <div><p>Notificações de lembrete</p><span>Avisos de horário do remédio</span></div>

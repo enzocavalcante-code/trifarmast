@@ -21,6 +21,7 @@ app.use('/api/me', requireAuth, require('./routes/me'));
 app.use('/api/orders', requireAuth, require('./routes/orders'));
 app.use('/api/reminders', requireAuth, require('./routes/reminders'));
 app.use('/api/points', requireAuth, require('./routes/points'));
+app.use('/api/places', requireAuth, require('./routes/places'));
 
 app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 
