@@ -721,15 +721,17 @@ input[type=search]::-webkit-search-cancel-button{cursor:pointer;}
   padding-top:max(12px, env(safe-area-inset-top));
 }
 .checkout-title{display:flex; flex-direction:column; align-items:center; gap:6px; min-width:0;}
-.checkout-title h3{margin:0; font-size:calc(16.5px * var(--fs));}
-.stepper{display:flex; align-items:center; gap:8px; list-style:none; margin:0; padding:0; font-size:calc(11.5px * var(--fs)); color:var(--ink-soft); font-weight:600;}
-.stepper li{display:flex; align-items:center; gap:5px;}
-.stepper li + li::before{content:""; width:18px; height:2px; background:var(--line); margin-right:3px;}
-.stepper span{width:18px;height:18px;border-radius:50%; border:1.5px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:calc(10.5px * var(--fs));}
-.stepper li.active{color:var(--ink);}
-.stepper li.active span{background:var(--green-600); border-color:var(--green-600); color:#fff;}
-.stepper li.done{color:var(--accent-text);}
-.stepper li.done span{background:var(--green-100); border-color:var(--green-400); color:var(--accent-text);}
+.checkout-title h3{margin:0; font-family:var(--font-body); font-weight:600; letter-spacing:-0.02em; font-size:calc(17px * var(--fs));}
+/* Etapas do pagamento: etapa atual em círculo escuro, etapa concluída com contorno verde */
+.stepper{display:flex; align-items:center; gap:8px; list-style:none; margin:0; padding:0; font-family:var(--font-body); font-size:calc(12px * var(--fs)); color:var(--ink-soft); font-weight:500;}
+.stepper li{display:flex; align-items:center; gap:6px;}
+.stepper li + li::before{content:""; width:20px; height:2px; border-radius:2px; background:var(--line); margin-right:2px;}
+.stepper span{width:19px;height:19px;border-radius:50%; border:1.5px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:calc(10.5px * var(--fs)); font-weight:600; font-variant-numeric:tabular-nums;}
+.stepper li.active{color:var(--ink); font-weight:600;}
+.stepper li.active span{background:var(--ink); border-color:var(--ink); color:var(--bg);}
+.stepper li.done{color:var(--green-600);}
+.stepper li.done span{background:var(--green-100); border-color:var(--green-500); color:var(--green-600);}
+[data-theme="dark"] .stepper li.done, [data-theme="dark"] .stepper li.done span{color:var(--green-400);}
 .checkout-scroll{
   flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;
   padding:24px 20px 32px;
