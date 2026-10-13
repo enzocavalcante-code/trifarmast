@@ -12,15 +12,47 @@ const LOCATION_STORAGE_KEY = 'trifarmas-location';
 const LOCATION_MAX_AGE_MS = 6 * 60 * 60 * 1000; // reaproveita a última localização por 6h
 const DEFAULT_CENTER = { lat: -23.5505, lng: -46.6333 }; // São Paulo (usado só no mapa, sem localização)
 
-// Como cada rede parceira aparece no OpenStreetMap (nome ou marca).
-const CHAIN_KEYWORDS = {
-  p1: ['raia'],
-  p2: ['drogasil'],
-  p3: ['pacheco'],
-  p4: ['pague menos', 'paguemenos'],
-  p5: ['ultrafarma'],
-  p6: ['panvel'],
-};
+// Redes conhecidas: palavras do nome/marca no OpenStreetMap → site (para o logo).
+// "partner" liga a loja à farmácia parceira do catálogo, para calcular a distância real.
+const PHARMACY_BRANDS = [
+  { keys: ['droga raia', 'drogaraia', 'raia'],               domain: 'drogaraia.com.br',          partner: 'p1' },
+  { keys: ['drogasil'],                                       domain: 'drogasil.com.br',           partner: 'p2' },
+  { keys: ['pacheco'],                                        domain: 'drogariaspacheco.com.br',   partner: 'p3' },
+  { keys: ['pague menos', 'paguemenos'],                      domain: 'paguemenos.com.br',         partner: 'p4' },
+  { keys: ['ultrafarma'],                                     domain: 'ultrafarma.com.br',         partner: 'p5' },
+  { keys: ['panvel'],                                         domain: 'panvel.com',                partner: 'p6' },
+  { keys: ['drogaria sao paulo', 'drogarias sao paulo'],      domain: 'drogariasaopaulo.com.br' },
+  { keys: ['onofre'],                                         domain: 'onofre.com.br' },
+  { keys: ['ultra popular'],                                  domain: 'ultrapopular.com.br' },
+  { keys: ['nissei'],                                         domain: 'farmaciasnissei.com.br' },
+  { keys: ['extrafarma'],                                     domain: 'extrafarma.com.br' },
+  { keys: ['venancio'],                                       domain: 'drogariavenancio.com.br' },
+  { keys: ['araujo'],                                         domain: 'araujo.com.br' },
+  { keys: ['sao joao'],                                       domain: 'saojoaofarmacias.com.br' },
+  { keys: ['drogal'],                                         domain: 'drogal.com.br' },
+  { keys: ['farmacia indiana', 'drogaria indiana'],           domain: 'farmaciaindiana.com.br' },
+  { keys: ['catarinense'],                                    domain: 'drogariacatarinense.com.br' },
+  { keys: ['drogaria rosario', 'drogarias rosario'],          domain: 'drogariarosario.com.br' },
+  { keys: ['drogarias globo', 'drogaria globo'],              domain: 'drogariasglobo.com.br' },
+  { keys: ['poupafarma'],                                     domain: 'poupafarma.com.br' },
+  { keys: ['big ben'],                                        domain: 'bigben.com.br' },
+  { keys: ['farmacias associadas'],                           domain: 'farmaciasassociadas.com.br' },
+];
+// Palavra inteira: "raia" não pode casar com "Praia".
+const BRAND_MATCHERS = PHARMACY_BRANDS.map(b => ({
+  ...b,
+  re: new RegExp(`(^|[^a-z0-9])(${b.keys.map(k => k.replace(/ /g, '\\s*')).join('|')})($|[^a-z0-9])`),
+}));
+
+function brandOf(p){
+  const text = normalizeText(`${p.name || ''} ${p.brand || ''}`);
+  return BRAND_MATCHERS.find(b => b.re.test(text)) || null;
+}
+
+function domainFromWebsite(url){
+  try{ return new URL(/^https?:/i.test(url) ? url : `https://${url}`).hostname.replace(/^www\./, ''); }
+  catch{ return null; }
+}
 
 const loc = {
   coords: null,          // { lat, lng }
@@ -267,11 +299,6 @@ async function searchAddress(){
 
 /* ---------------- farmácias reais ao redor ---------------- */
 
-function chainOf(p){
-  const searchable = normalizeText(`${p.name || ''} ${p.brand || ''}`);
-  return Object.keys(CHAIN_KEYWORDS).find(id => CHAIN_KEYWORDS[id].some(k => searchable.includes(k))) || null;
-}
-
 async function loadNearbyPharmacies(requestId){
   const center = loc.coords;
   try{
@@ -279,7 +306,15 @@ async function loadNearbyPharmacies(requestId){
     if(requestId !== loc.requestId) return;
     loc.radiusKm = data.radiusKm;
     loc.pharmacies = data.pharmacies
-      .map(p => ({ ...p, km: haversineKm(center, p), chainId: chainOf(p) }))
+      .map(p => {
+        const brand = brandOf(p);
+        return {
+          ...p,
+          km: haversineKm(center, p),
+          chainId: brand && brand.partner || null,
+          domain: (brand && brand.domain) || (p.website && domainFromWebsite(p.website)) || null,
+        };
+      })
       .sort((a, b) => a.km - b.km);
     loc.chainMatches = {};
     for(const p of loc.pharmacies){
@@ -436,9 +471,9 @@ function renderPharmacyList(){
   el.innerHTML = loc.pharmacies.slice(0, 20).map(p=>`
     <div class="near-item">
       <button class="near-main" onclick="focusPharmacy('${p.id}')">
-        <span class="near-dot ${p.chainId ? 'partner' : ''}"></span>
+        ${pharmacyLogoHtml(p, 'near-logo')}
         <span class="near-text">
-          <b>${escapeHtml(p.name)}</b>
+          <b>${escapeHtml(p.name)}${p.chainId ? '<em class="partner-tag">Parceira</em>' : ''}</b>
           <span>${[p.street, p.suburb].filter(Boolean).map(escapeHtml).join(' · ') || 'Endereço não informado'}</span>
         </span>
         <span class="near-km">${formatKm(p.km)}${p.open24h ? '<em>24h</em>' : ''}</span>

@@ -125,12 +125,26 @@ async function loadCatalog(){
 const allMeds = () => state.catalog.medicines;
 const medById = id => allMeds().find(m=>m.id===id);
 const pharmacyById = id => state.catalog.pharmacies.find(p=>p.id===id);
-const pharmacyLogo = pharm => `https://www.google.com/s2/favicons?domain=${pharm.domain}&sz=64`;
+const faviconUrl = domain => `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
 
+// Logo da farmácia (ícone do site da rede). Sem site conhecido, ou se o ícone não
+// carregar, mostra a inicial do nome num quadrado colorido.
 function pharmacyLogoHtml(pharm, extraClass = ''){
-  const letter = escapeHtml(pharm.name.charAt(0));
-  return `<img class="pharm-dot ${extraClass}" src="${pharmacyLogo(pharm)}" alt="" loading="lazy"
-    onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'pharm-dot pharm-dot-fallback ${extraClass}',textContent:'${letter}'}));">`;
+  const letter = escapeHtml((pharm.name || '?').trim().charAt(0).toUpperCase());
+  const hue = [...(pharm.name || '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 140);
+  if(!pharm.domain){
+    return `<div class="pharm-dot pharm-dot-fallback ${extraClass}" style="--logo-hue:${hue}">${letter}</div>`;
+  }
+  return `<img class="pharm-dot ${extraClass}" src="${faviconUrl(pharm.domain)}" alt="" loading="lazy"
+    data-letter="${letter}" data-hue="${hue}" onerror="logoFallback(this)">`;
+}
+
+function logoFallback(img){
+  const div = document.createElement('div');
+  div.className = img.className + ' pharm-dot-fallback';
+  div.style.setProperty('--logo-hue', img.dataset.hue);
+  div.textContent = img.dataset.letter;
+  img.replaceWith(div);
 }
 
 /* ---------------- foto de perfil ---------------- */
@@ -147,17 +161,6 @@ function setAvatar(img, src){
   img.referrerPolicy = 'no-referrer'; // necessário para fotos do Google
   img.onerror = () => { img.onerror = null; img.src = initialsAvatar(state.user && state.user.name); };
   img.src = src || initialsAvatar(state.user && state.user.name);
-}
-
-let signupAvatarData = null;
-async function pickSignupAvatar(input){
-  const file = input.files && input.files[0];
-  input.value = '';
-  if(!file) return;
-  try{
-    signupAvatarData = await resizeImage(file, 320, { square:true });
-    $('signup-avatar-preview').src = signupAvatarData;
-  }catch(e){ showToast(e.message); }
 }
 
 // A foto escolhida manualmente substitui a do Google e fica salva na conta.
@@ -236,7 +239,7 @@ function renderGoogleButtons(){
   const width = Math.round(Math.min(400, Math.max(200, inner)));
   const buttonOptions = {
     type:'standard', size:'large', shape:'pill', width, logo_alignment:'center',
-    theme: state.theme === 'dark' ? 'filled_black' : 'outline',
+    theme: 'outline', // sempre branco, também no tema escuro
   };
   $('google-btn-login').innerHTML = '';
   $('google-btn-signup').innerHTML = '';
@@ -295,8 +298,7 @@ async function doSignup(){
   const password = $('signup-pass').value;
   if(!name || !email || !password){ showToast('Preencha todos os campos.'); return; }
   try{
-    const session = await api.signup({ name, email, password, avatar: signupAvatarData || undefined });
-    signupAvatarData = null;
+    const session = await api.signup({ name, email, password });
     showToast('Conta criada! Você ganhou 50 pontos de boas-vindas.');
     await enterApp(session);
   }catch(e){
@@ -418,7 +420,6 @@ function applyTheme(theme){
   state.theme = theme;
   document.body.setAttribute('data-theme', theme);
   $('settings-theme-switch').classList.toggle('on', theme==='dark');
-  renderGoogleButtons();
   $('theme-icon').innerHTML = theme==='dark'
     ? '<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>'
     : '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
