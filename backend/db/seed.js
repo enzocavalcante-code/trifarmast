@@ -2,15 +2,11 @@
 // atualiza o que mudou). Rodar várias vezes é seguro.
 
 const { PHARMACIES, MEDICINES, REWARDS, priceFor } = require('./catalog');
-const { describe } = require('./equivalents');
 
 // Conta de demonstração que já vem preenchida na tela de login.
 const DEMO_USER = { name: 'Trifarmas', email: 'trifarmas@gmail.com', password: '123456', points: 340 };
 
-// Dia de hoje em UTC ("2026-10-13"): usado no preço do dia e no histórico.
-const todayUTC = () => new Date().toISOString().slice(0, 10);
-
-async function seed(client, hashPassword, { simulateDailyPrices = true } = {}) {
+async function seed(client, hashPassword) {
   await client.query(
     `INSERT INTO pharmacies (id, name, dist_km, domain)
      SELECT * FROM unnest($1::text[], $2::text[], $3::numeric[], $4::text[])
@@ -18,39 +14,22 @@ async function seed(client, hashPassword, { simulateDailyPrices = true } = {}) {
     [PHARMACIES.map(p => p.id), PHARMACIES.map(p => p.name), PHARMACIES.map(p => p.dist), PHARMACIES.map(p => p.domain)]
   );
 
-  // Dados calculados de cada remédio (dosagem, grupo de equivalentes, unidades).
-  const extra = MEDICINES.map(m => describe({ name: m[1], presentation: m[2], ingredient: m[3] }));
   const col = i => MEDICINES.map(m => m[i]);
   await client.query(
-    `INSERT INTO medicines (id, name, presentation, active_ingredient, category, requires_prescription, popularity,
-                            strength, equiv_group, unit_count, unit_label, is_generic)
-     SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::boolean[], $7::int[],
-                          $8::text[], $9::text[], $10::smallint[], $11::text[], $12::boolean[])
+    `INSERT INTO medicines (id, name, presentation, active_ingredient, category, requires_prescription, popularity)
+     SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::boolean[], $7::int[])
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name, presentation = EXCLUDED.presentation, active_ingredient = EXCLUDED.active_ingredient,
-       category = EXCLUDED.category, requires_prescription = EXCLUDED.requires_prescription, popularity = EXCLUDED.popularity,
-       strength = EXCLUDED.strength, equiv_group = EXCLUDED.equiv_group, unit_count = EXCLUDED.unit_count,
-       unit_label = EXCLUDED.unit_label, is_generic = EXCLUDED.is_generic`,
-    [col(0), col(1), col(2), col(3), col(4), col(6), col(7),
-     extra.map(e => e.strength), extra.map(e => e.equivGroup), extra.map(e => e.unitCount),
-     extra.map(e => e.unitLabel), extra.map(e => e.isGeneric)]
+       category = EXCLUDED.category, requires_prescription = EXCLUDED.requires_prescription, popularity = EXCLUDED.popularity`,
+    [col(0), col(1), col(2), col(3), col(4), col(6), col(7)]
   );
 
-  const day = todayUTC();
-  const priceRows = MEDICINES.flatMap(m => PHARMACIES.map(p => [m[0], p.id, priceFor(m, p, simulateDailyPrices ? day : null)]));
+  const priceRows = MEDICINES.flatMap(m => PHARMACIES.map(p => [m[0], p.id, priceFor(m, p)]));
   await client.query(
     `INSERT INTO medicine_prices (medicine_id, pharmacy_id, price)
      SELECT * FROM unnest($1::text[], $2::text[], $3::numeric[])
      ON CONFLICT (medicine_id, pharmacy_id) DO UPDATE SET price = EXCLUDED.price`,
     [priceRows.map(r => r[0]), priceRows.map(r => r[1]), priceRows.map(r => r[2])]
-  );
-
-  // Histórico: uma linha por remédio/farmácia/dia, com o preço daquele dia.
-  await client.query(
-    `INSERT INTO price_history (medicine_id, pharmacy_id, day, price)
-     SELECT medicine_id, pharmacy_id, $1::date, price FROM medicine_prices
-     ON CONFLICT (medicine_id, pharmacy_id, day) DO UPDATE SET price = EXCLUDED.price`,
-    [day]
   );
 
   await client.query('DELETE FROM rewards WHERE id <> ALL($1::text[])', [REWARDS.map(r => r.id)]);
@@ -77,4 +56,4 @@ async function seed(client, hashPassword, { simulateDailyPrices = true } = {}) {
   }
 }
 
-module.exports = { seed, todayUTC };
+module.exports = { seed };

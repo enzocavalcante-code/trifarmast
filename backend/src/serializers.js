@@ -13,9 +13,6 @@ function user(row) {
     name: row.name,
     email: row.email,
     googleAccount: row.google_account,
-    // Conta do Google que também criou uma senha (pela recuperação de senha)
-    // continua podendo trocar a senha dentro do app.
-    hasPassword: !!row.password_hash,
     avatar: row.avatar,
     avatarCustom: row.avatar_custom,
     hasGooglePhoto: !!row.google_picture,
@@ -82,9 +79,6 @@ function order(row, itemRows = [], prescriptionFileName = null) {
     requiresPrescription: row.requires_prescription,
     prescriptionChoice: row.prescription_choice,
     prescriptionFileName,
-    // 'pharmacy' quando o balcão validou o código; 'user' em pedidos antigos.
-    pickupConfirmedBy: row.pickup_validated_by || null,
-    pickupConfirmedAt: row.pickup_validated_at || null,
     status: orderStatus(row),
     timeline: orderTimeline(row).map(s => ({ status: s.status, at: new Date(s.at).toISOString() })),
     createdAt: row.created_at,

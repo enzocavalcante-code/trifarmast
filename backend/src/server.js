@@ -3,15 +3,12 @@ const cors = require('cors');
 const config = require('./config');
 const { migrate } = require('./db');
 const { requireAuth } = require('./auth');
-const { securityHeaders } = require('./security');
 const { HttpError } = require('./errors');
 
 const app = express();
-app.disable('x-powered-by');
 // O Render fica na frente da API: confia no cabeçalho X-Forwarded-For para saber o IP real do usuário.
 app.set('trust proxy', true);
 
-app.use(securityHeaders);
 app.use(cors({
   // Sem CORS_ORIGINS configurado, libera qualquer origem (útil em desenvolvimento).
   origin: config.corsOrigins.length ? config.corsOrigins : true,
@@ -22,14 +19,11 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/catalog'));
-app.use('/api/pickups', require('./routes/pickups'));       // painel da farmácia (senha própria)
 app.use('/api/me', requireAuth, require('./routes/me'));
 app.use('/api/orders', requireAuth, require('./routes/orders'));
 app.use('/api/reminders', requireAuth, require('./routes/reminders'));
 app.use('/api/points', requireAuth, require('./routes/points'));
 app.use('/api/places', requireAuth, require('./routes/places'));
-app.use('/api/alerts', requireAuth, require('./routes/alerts'));
-app.use('/api/notifications', requireAuth, require('./routes/notifications'));
 
 app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 
@@ -37,7 +31,6 @@ app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 app.use((err, req, res, next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
   if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Arquivo muito grande. Envie um arquivo de até 8 MB.' });
-  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Não foi possível ler os dados enviados.' });
   console.error(err);
   res.status(500).json({ error: 'Erro interno. Tente novamente em instantes.' });
 });

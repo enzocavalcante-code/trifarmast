@@ -28,11 +28,3 @@ services:
         sync: false   # preencha com a URL do Vercel, ex: https://trifarmas.vercel.app
       - key: ALLOW_DEMO_GOOGLE
         value: "true"
-      # Senha do painel da farmácia (/farmacia.html). Sem ela, ninguém consegue
-      # confirmar a retirada de um pedido — e os pontos nunca são creditados.
-      - key: PHARMACY_PIN
-        sync: false   # escolha uma senha para o balcão
-      - key: SIMULATE_DAILY_PRICES
-        value: "true"
-      - key: PASSWORD_RESET_ECHO
-        value: "false"
