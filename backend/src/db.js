@@ -3,6 +3,7 @@ const path = require('path');
 const { Pool } = require('pg');
 const config = require('./config');
 const { hashPassword } = require('./auth');
+const { checkPriceAlerts } = require('./prices');
 const { seed } = require('../db/seed');
 
 const pool = new Pool({
@@ -28,11 +29,14 @@ async function transaction(fn) {
   }
 }
 
-// Cria as tabelas (se não existirem) e popula o catálogo inicial.
+// Cria as tabelas (se não existirem), popula o catálogo e avisa quem estava
+// esperando um preço mais baixo.
 async function migrate() {
   const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
   await pool.query(schema);
-  await transaction(client => seed(client, hashPassword));
+  await transaction(client => seed(client, hashPassword, { simulateDailyPrices: config.simulateDailyPrices }));
+  const alerts = await checkPriceAlerts(pool);
+  if (alerts) console.log(`Alertas de preço disparados: ${alerts}`);
 }
 
 module.exports = { pool, query, transaction, migrate };

@@ -244,12 +244,30 @@ function variation(medId, pharmId) {
   return 0.86 + (h % 1000) / 1000 * 0.32;
 }
 
-function priceFor(med, pharmacy) {
+// Preço "de tabela" do remédio nesta farmácia (sempre o mesmo).
+function basePriceFor(med, pharmacy) {
   const [id, , , , , base] = med;
   if (FIXED_PRICES[id]) return FIXED_PRICES[id][pharmacy.id];
   const raw = base * pharmacy.priceBias * variation(id, pharmacy.id);
   const cents = Math.round(raw * 10) * 10 - 1; // termina em ,x9
   return Math.max(199, cents) / 100;
+}
+
+// Oscilação do dia (simulada): até -6% / +6% em torno do preço de tabela.
+// É determinística — no mesmo dia o preço é sempre o mesmo —, o que faz o
+// histórico de preços e o alerta "avise quando baixar" funcionarem de verdade.
+// Para congelar os preços, use SIMULATE_DAILY_PRICES=false no servidor.
+function dailyFactor(medId, pharmId, day) {
+  let h = 2166136261;
+  for (const ch of `${medId}:${pharmId}:${day}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return 0.94 + (h % 121) / 1000;
+}
+
+function priceFor(med, pharmacy, day = null) {
+  const base = basePriceFor(med, pharmacy);
+  if (!day) return base;
+  const price = Math.round(base * dailyFactor(med[0], pharmacy.id, day) * 100) / 100;
+  return Math.max(1.99, price);
 }
 
 // Cada 1 ponto vale R$0,05; recompensas maiores rendem um pouco mais por ponto.
@@ -260,4 +278,4 @@ const REWARDS = [
   { id: 'r4', name: 'R$40 de desconto', desc: 'Em compras a partir de R$150',  cost: 720, amount: 40, minOrder: 150 },
 ];
 
-module.exports = { PHARMACIES, MEDICINES, REWARDS, priceFor };
+module.exports = { PHARMACIES, MEDICINES, REWARDS, priceFor, basePriceFor };

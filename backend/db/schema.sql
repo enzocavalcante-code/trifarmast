@@ -24,6 +24,15 @@ ALTER TABLE medicines ADD COLUMN IF NOT EXISTS presentation          TEXT    NOT
 ALTER TABLE medicines ADD COLUMN IF NOT EXISTS active_ingredient     TEXT    NOT NULL DEFAULT '';
 ALTER TABLE medicines ADD COLUMN IF NOT EXISTS requires_prescription BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE medicines ADD COLUMN IF NOT EXISTS popularity            INTEGER NOT NULL DEFAULT 0;
+-- Equivalência genérico/marca: remédios com o mesmo princípio ativo e a mesma
+-- dosagem ficam no mesmo equiv_group. unit_count é a quantidade da caixa
+-- (ex.: "20 comprimidos" = 20), usada para comparar o preço por unidade.
+ALTER TABLE medicines ADD COLUMN IF NOT EXISTS strength    TEXT     NOT NULL DEFAULT '';
+ALTER TABLE medicines ADD COLUMN IF NOT EXISTS equiv_group TEXT     NOT NULL DEFAULT '';
+ALTER TABLE medicines ADD COLUMN IF NOT EXISTS unit_count  SMALLINT NOT NULL DEFAULT 1;
+ALTER TABLE medicines ADD COLUMN IF NOT EXISTS unit_label  TEXT     NOT NULL DEFAULT 'unidade';
+ALTER TABLE medicines ADD COLUMN IF NOT EXISTS is_generic  BOOLEAN  NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS medicines_equiv_idx ON medicines(equiv_group);
 
 CREATE TABLE IF NOT EXISTS medicine_prices (
   medicine_id  TEXT NOT NULL REFERENCES medicines(id) ON DELETE CASCADE,
@@ -56,6 +65,21 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS google_picture TEXT;                          -- última foto vinda do Google
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_custom  BOOLEAN NOT NULL DEFAULT FALSE; -- TRUE = usuário escolheu a foto manualmente
+-- Proteção contra tentativas de adivinhar a senha.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins SMALLINT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until  TIMESTAMPTZ;
+
+-- Códigos de redefinição de senha (só o hash do código é guardado).
+CREATE TABLE IF NOT EXISTS password_resets (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash   TEXT NOT NULL,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used_at     TIMESTAMPTZ,
+  attempts    SMALLINT NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS password_resets_user_idx ON password_resets(user_id, created_at DESC);
 
 DO $$ BEGIN
   ALTER TABLE medicines
@@ -87,7 +111,15 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_name              TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS requires_prescription    BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS prescription_choice      TEXT;         -- 'upload' | 'in_person'
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS prescription_resolved_at TIMESTAMPTZ;
+-- A retirada é confirmada por quem está no balcão da farmácia, validando o
+-- código do pedido no painel da farmácia. Só então os pontos são creditados.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_validated_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_validated_by TEXT;   -- 'pharmacy' | 'user' (pedidos antigos)
 CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id, created_at DESC);
+-- Busca pelo código no painel da farmácia (só pedidos em aberto).
+CREATE INDEX IF NOT EXISTS orders_open_code_idx ON orders(pickup_code) WHERE NOT completed;
+UPDATE orders SET pickup_validated_by = 'user', pickup_validated_at = created_at
+ WHERE completed AND pickup_validated_by IS NULL;
 
 CREATE TABLE IF NOT EXISTS order_items (
   id                     BIGSERIAL PRIMARY KEY,
@@ -144,6 +176,45 @@ CREATE TABLE IF NOT EXISTS reminders (
   fired      BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX IF NOT EXISTS reminders_user_idx ON reminders(user_id);
+
+-- ---------- Avisos (central de notificações do app) ----------
+CREATE TABLE IF NOT EXISTS notifications (
+  id           BIGSERIAL PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL,              -- 'price_drop' | 'order' | 'info'
+  title        TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  medicine_id  TEXT REFERENCES medicines(id) ON DELETE SET NULL,
+  order_id     BIGINT REFERENCES orders(id) ON DELETE SET NULL,
+  read_at      TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_id, created_at DESC);
+
+-- ---------- Histórico de preços ----------
+-- Uma linha por remédio/farmácia/dia: o histórico começa a existir no dia em
+-- que a API é publicada e cresce a cada atualização de preço (nada é inventado).
+CREATE TABLE IF NOT EXISTS price_history (
+  medicine_id  TEXT NOT NULL REFERENCES medicines(id) ON DELETE CASCADE,
+  pharmacy_id  TEXT NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  day          DATE NOT NULL,
+  price        NUMERIC(10,2) NOT NULL,
+  PRIMARY KEY (medicine_id, pharmacy_id, day)
+);
+CREATE INDEX IF NOT EXISTS price_history_med_idx ON price_history(medicine_id, day);
+
+-- ---------- Alertas de preço ("avise quando baixar") ----------
+CREATE TABLE IF NOT EXISTS price_alerts (
+  id               BIGSERIAL PRIMARY KEY,
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  medicine_id      TEXT NOT NULL REFERENCES medicines(id) ON DELETE CASCADE,
+  target_price     NUMERIC(10,2),             -- NULL = avisar em qualquer queda
+  reference_price  NUMERIC(10,2) NOT NULL,    -- menor preço no momento em que o alerta foi criado
+  notified_at      TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, medicine_id)
+);
+CREATE INDEX IF NOT EXISTS price_alerts_med_idx ON price_alerts(medicine_id) WHERE notified_at IS NULL;
 
 -- Fotos enviadas manualmente antes da coluna avatar_custom existir continuam valendo.
 UPDATE users SET avatar_custom = TRUE

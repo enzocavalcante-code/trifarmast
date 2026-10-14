@@ -67,8 +67,49 @@ function advanceOrder(orderId, status){
   order.status = status;
   if(state.activeTab === 'orders') renderOrders();
   updateOrdersBadge();
-  if(status === STATUS.READY) showToast(`Pedido #${order.id} está pronto para retirar na ${order.pharmacyName}!`);
+  if(status === STATUS.READY) showToast(`Pedido #${order.id} pronto na ${order.pharmacyName}! Mostre o código ${order.code} no balcão.`);
 }
+
+/* ---------------- atualização automática ----------------
+   Quem confirma a retirada é a farmácia, no painel do balcão. Então o app
+   consulta os pedidos de novo de vez em quando (e ao voltar para a tela) para
+   mostrar a confirmação e os pontos creditados. */
+
+let ordersPollTimer = null;
+
+function startOrdersPolling(){
+  stopOrdersPolling();
+  ordersPollTimer = setInterval(syncOrders, 20000);
+}
+
+function stopOrdersPolling(){
+  if(ordersPollTimer){ clearInterval(ordersPollTimer); ordersPollTimer = null; }
+}
+
+async function syncOrders(){
+  if(!state.user) return;
+  try{
+    const list = await api.orders();
+    const doneBefore = new Set(state.orders.filter(o => o.status === STATUS.DONE).map(o => o.id));
+    setOrders(list);
+    updateOrdersBadge();
+    if(state.activeTab === 'orders') renderOrders();
+
+    const confirmed = state.orders.filter(o => o.status === STATUS.DONE && !doneBefore.has(o.id));
+    if(confirmed.length){
+      refreshPoints();
+      refreshNotifications();
+      const order = confirmed[0];
+      showToast(order.points > 0
+        ? `${order.pharmacyName} confirmou a retirada do pedido #${order.id}: +${order.points} pts!`
+        : `${order.pharmacyName} confirmou a retirada do pedido #${order.id}.`);
+    }
+  }catch{ /* sem internet: tenta de novo no próximo ciclo */ }
+}
+
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden && state.user) syncOrders();
+});
 
 // Badge na navegação: pedidos que precisam de uma ação do usuário.
 function updateOrdersBadge(){
@@ -176,28 +217,41 @@ function renderOrders(){
         <div class="order-pay-row"><span>Valor pago</span><b>${formatBRL(o.paidAmount)}</b></div>
         <div class="order-pay-row muted"><span>Pagamento</span><span>${escapeHtml(o.paymentMethod)}</span></div>
       </div>
-      <div class="order-code">
-        <span>Código de retirada</span>
-        <b>${o.code}</b>
-      </div>
-      ${o.status === STATUS.READY ? `<button class="confirm-pickup-btn" onclick="confirmPickup(${o.id})">Confirmar retirada${o.points > 0 ? ` e receber ${o.points} pts` : ''}</button>` : ''}
-      ${o.status === STATUS.DONE && o.points > 0 ? `<div class="order-earned">+${o.points} pontos creditados</div>` : ''}
-      ${o.status !== STATUS.DONE && o.status !== STATUS.READY && o.points > 0 ? `<div class="order-pending-points">+${o.points} pts ao retirar</div>` : ''}
+      ${renderPickupCode(o)}
+      ${o.status === STATUS.DONE
+        ? `<div class="order-earned">${o.pickupConfirmedBy === 'pharmacy' ? 'Retirada confirmada pela farmácia' : 'Pedido concluído'}${o.points > 0 ? ` · +${o.points} pontos creditados` : ''}</div>`
+        : ''}
     </article>`;
   }).join('');
 }
 
-async function confirmPickup(orderId){
-  const order = state.orders.find(o => o.id === orderId);
-  if(!order || order.status !== STATUS.READY) return;
+/* Código de retirada: é o que a farmácia pede no balcão. A confirmação da
+   entrega (e o crédito dos pontos) é feita por lá, no painel da farmácia. */
+function renderPickupCode(order){
+  if(order.status === STATUS.DONE){
+    return `<div class="order-code done"><span>Código usado</span><b>${order.code}</b></div>`;
+  }
+  const ready = order.status === STATUS.READY;
+  return `
+    <div class="order-code ${ready ? 'ready' : ''}">
+      <div class="order-code-text">
+        <span>${ready ? 'Mostre este código no balcão' : 'Código de retirada'}</span>
+        ${order.points > 0 ? `<em>${ready ? `A farmácia confirma a entrega e você recebe +${order.points} pts` : `+${order.points} pts quando a farmácia confirmar a entrega`}</em>` : ''}
+      </div>
+      <button class="code-copy" onclick="copyPickupCode('${order.code}')" title="Copiar código">
+        <b>${order.code}</b>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>
+      </button>
+    </div>
+    ${ready ? `<a class="pharmacy-panel-link" href="farmacia.html" target="_blank" rel="noopener">Sou do balcão: abrir painel da farmácia</a>` : ''}`;
+}
+
+async function copyPickupCode(code){
   try{
-    const result = await api.confirmPickup(orderId);
-    addOrder(result.order);
-    state.points = result.points;
-    await refreshPoints();
-    showToast(order.points > 0 ? `Pedido concluído! +${order.points} pontos creditados.` : 'Pedido concluído!');
-  }catch(e){
-    showToast(e.message);
+    await navigator.clipboard.writeText(code);
+    showToast(`Código ${code} copiado.`);
+  }catch{
+    showToast(`Seu código é ${code}.`);
   }
 }
 

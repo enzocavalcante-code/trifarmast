@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const config = require('./config');
@@ -20,4 +21,17 @@ function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { hashPassword, checkPassword, signToken, requireAuth };
+/* Código numérico aleatório (recuperação de senha, código de retirada).
+   Só o hash do código fica no banco. */
+const randomDigits = length => Array.from(crypto.randomBytes(length))
+  .map(byte => byte % 10).join('');
+
+const hashCode = code => crypto.createHash('sha256').update(String(code)).digest('hex');
+
+const sameCode = (code, hash) => {
+  const a = Buffer.from(hashCode(code));
+  const b = Buffer.from(String(hash || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
+module.exports = { hashPassword, checkPassword, signToken, requireAuth, randomDigits, hashCode, sameCode };

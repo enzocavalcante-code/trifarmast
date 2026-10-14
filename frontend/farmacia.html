@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1e8a4c">
+<meta name="robots" content="noindex">
+<title>Painel da farmácia — Trifarmas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-theme="light">
+
+<div class="counter-wrap">
+  <header class="counter-head">
+    <img src="assets/logo.png" class="app-logo-img wordmark counter-logo" alt="Trifarmas">
+    <span class="counter-tag">Painel da farmácia</span>
+  </header>
+
+  <!-- Entrar com a senha do balcão -->
+  <section id="counter-login" class="counter-card">
+    <h1>Entrar no painel</h1>
+    <p>Use a senha do balcão para conferir e confirmar as retiradas. Esta tela é para quem atende na farmácia, não para o cliente.</p>
+    <div id="counter-error" class="auth-error hidden"></div>
+    <div class="field">
+      <label for="counter-pin">Senha do balcão</label>
+      <input id="counter-pin" type="password" autocomplete="off" placeholder="••••" onkeydown="if(event.key==='Enter') enterCounter()">
+    </div>
+    <button class="btn btn-primary" onclick="enterCounter()">Entrar</button>
+  </section>
+
+  <!-- Conferir o código do pedido -->
+  <section id="counter-main" class="counter-card hidden">
+    <div class="counter-main-head">
+      <h1>Código do cliente</h1>
+      <button class="link-btn subtle" onclick="leaveCounter()">Sair</button>
+    </div>
+    <p>Peça o código de 6 números que aparece no app do cliente.</p>
+    <div id="counter-lookup-error" class="auth-error hidden"></div>
+    <div class="field">
+      <label for="counter-code">Código de retirada</label>
+      <input id="counter-code" class="code-input big" type="text" inputmode="numeric" maxlength="6" placeholder="000000"
+             autocomplete="off" oninput="onCodeInput(this)" onkeydown="if(event.key==='Enter') lookupOrder()">
+    </div>
+    <button class="btn btn-primary" id="counter-lookup-btn" onclick="lookupOrder()">Conferir pedido</button>
+    <div id="counter-result"></div>
+  </section>
+
+  <p class="counter-foot">Trifarmas · a confirmação da entrega libera os pontos do cliente.</p>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script src="farmacia.js"></script>
+<script>initCounter();</script>
+</body>
+</html>

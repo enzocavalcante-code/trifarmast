@@ -1,0 +1,24 @@
+{
+  "name": "Trifarmas — compare o preço dos remédios",
+  "short_name": "Trifarmas",
+  "description": "Compare o preço dos remédios nas farmácias perto de você, junte pontos e troque por desconto.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3faf5",
+  "theme_color": "#1e8a4c",
+  "categories": ["health", "shopping", "medical"],
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Buscar remédio", "url": "index.html#buscar" },
+    { "name": "Meus pedidos", "url": "index.html#pedidos" },
+    { "name": "Painel da farmácia", "url": "farmacia.html" }
+  ]
+}

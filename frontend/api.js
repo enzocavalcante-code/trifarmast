@@ -38,19 +38,35 @@ const api = (() => {
     signup: data => post('/auth/signup', data),
     googleLogin: credential => post('/auth/google', { credential }),
     googleDemo: mode => post('/auth/google-demo', { mode }),
+    forgotPassword: email => post('/auth/password/forgot', { email }),
+    resetPassword: data => post('/auth/password/reset', data),
 
     // Perfil
     updateMe: data => patch('/me', data),
+    exportMyData: () => get('/me/export'),
+    deleteAccount: data => request('DELETE', '/me', data),
 
     // Catálogo
     catalog: () => get('/catalog'),
+    priceHistory: medicineId => get(`/medicines/${encodeURIComponent(medicineId)}/history`),
 
     // Pedidos
     orders: () => get('/orders'),
     createOrder: data => post('/orders', data),
-    confirmPickup: id => post(`/orders/${id}/pickup`),
+    createSplitOrders: data => post('/orders/split', data),
     sendPrescription: (id, data) => post(`/orders/${id}/prescription`, data),
     getPrescription: id => get(`/orders/${id}/prescription`),
+
+    // Avisos e alertas de preço
+    notifications: () => get('/notifications'),
+    markNotificationsRead: (ids = []) => post('/notifications/read', { ids }),
+    priceAlerts: () => get('/alerts'),
+    addPriceAlert: (medicineId, targetPrice = null) => post('/alerts', { medicineId, targetPrice }),
+    removePriceAlert: medicineId => del(`/alerts/${encodeURIComponent(medicineId)}`),
+
+    // Painel da farmácia (usa a senha do balcão, não a sessão do cliente)
+    pickupLookup: (code, pin) => post('/pickups/lookup', { code, pin }),
+    pickupConfirm: (code, pin) => post('/pickups/confirm', { code, pin }),
 
     // Lembretes
     reminders: () => get('/reminders'),

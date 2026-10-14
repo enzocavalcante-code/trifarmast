@@ -24,6 +24,9 @@ const NAV_ITEMS = [
 const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>';
 const ICON_RX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>';
 const ICON_CART_PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.6 12.2a1 1 0 001 .8h9.7a1 1 0 001-.8L21 7H6.2"/><path d="M13 9v4M11 11h4"/></svg>';
+const ICON_WARN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L2.8 17a2 2 0 001.7 3h15a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>';
+const ICON_BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10a6 6 0 10-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10.3 20a2 2 0 003.4 0"/></svg>';
+const ICON_TREND_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7l6 6 4-4 8 8"/><path d="M21 17v-5h-5"/></svg>';
 
 const state = {
   user:null,
@@ -40,6 +43,8 @@ const state = {
   calSelectedDay: new Date().getDate(),
   catalog: { pharmacies: [], medicines: [], rewards: [] },
   pointsInfo: { pending: 0, coupons: [], history: [] },
+  notifications: { unread: 0, items: [] },
+  priceAlerts: [],
 };
 
 /* ---------------- utilidades ---------------- */
@@ -104,9 +109,10 @@ function applyLogo(){
 }
 
 function showView(name){
-  $('view-login').classList.toggle('hidden', name!=='login');
-  $('view-signup').classList.toggle('hidden', name!=='signup');
+  ['login','signup','forgot'].forEach(view=>
+    $('view-'+view).classList.toggle('hidden', view!==name));
   $('login-error').classList.add('hidden');
+  if(name==='forgot') resetForgotForm();
   renderGoogleButtons();
 }
 
@@ -306,9 +312,92 @@ async function doSignup(){
   }
 }
 
+/* ---------------- esqueci minha senha ----------------
+   Etapa 1: pede um código de 6 números por e-mail.
+   Etapa 2: com o código, define a nova senha e já entra no app. */
+
+function resetForgotForm(){
+  $('forgot-step-email').classList.remove('hidden');
+  $('forgot-step-code').classList.add('hidden');
+  $('forgot-error').classList.add('hidden');
+  $('forgot-ok').classList.add('hidden');
+  $('forgot-sub').textContent = 'Digite o e-mail da sua conta e enviamos um código para criar uma nova senha.';
+  $('forgot-code').value = '';
+  $('forgot-pass').value = '';
+  $('forgot-pass2').value = '';
+}
+
+function backToForgotEmail(){
+  resetForgotForm();
+  $('forgot-email').focus();
+}
+
+function showForgotError(message){
+  const box = $('forgot-error');
+  box.textContent = message;
+  box.classList.remove('hidden');
+  $('forgot-ok').classList.add('hidden');
+}
+
+async function requestResetCode(){
+  const email = $('forgot-email').value.trim();
+  if(!email){ showForgotError('Digite o e-mail da sua conta.'); return; }
+  const button = $('forgot-send-btn');
+  button.disabled = true;
+  button.textContent = 'Enviando…';
+  try{
+    const result = await api.forgotPassword(email);
+    $('forgot-error').classList.add('hidden');
+    $('forgot-step-email').classList.add('hidden');
+    $('forgot-step-code').classList.remove('hidden');
+    $('forgot-sub').textContent = `Enviamos um código para ${email}. Ele vale por ${result.expiresInMinutes || 15} minutos.`;
+    const box = $('forgot-ok');
+    // Em ambiente de teste o servidor pode devolver o código (PASSWORD_RESET_ECHO).
+    if(result.code){
+      $('forgot-code').value = result.code;
+      box.innerHTML = `Modo de teste: o código <b>${escapeHtml(result.code)}</b> já foi preenchido para você.`;
+      box.classList.remove('hidden');
+    } else {
+      box.textContent = 'Se existir uma conta com este e-mail, o código chegou na caixa de entrada. Confira também o spam.';
+      box.classList.remove('hidden');
+    }
+    $('forgot-code').focus();
+  }catch(e){
+    showForgotError(e.message);
+  }finally{
+    button.disabled = false;
+    button.textContent = 'Enviar código';
+  }
+}
+
+async function confirmResetPassword(){
+  const email = $('forgot-email').value.trim();
+  const code = $('forgot-code').value.trim();
+  const password = $('forgot-pass').value;
+  const confirm = $('forgot-pass2').value;
+  if(code.length !== 6){ showForgotError('O código tem 6 números.'); return; }
+  if(password.length < 6){ showForgotError('A nova senha precisa ter pelo menos 6 caracteres.'); return; }
+  if(password !== confirm){ showForgotError('A confirmação da nova senha não confere.'); return; }
+
+  const button = $('forgot-save-btn');
+  button.disabled = true;
+  button.textContent = 'Salvando…';
+  try{
+    const session = await api.resetPassword({ email, code, password });
+    showToast('Senha alterada! Você já está conectado.');
+    await enterApp(session);
+  }catch(e){
+    showForgotError(e.message);
+  }finally{
+    button.disabled = false;
+    button.textContent = 'Salvar nova senha e entrar';
+  }
+}
+
 function doLogout(){
   api.setToken(null);
   stopOrderTimers();
+  stopOrdersPolling();
   if(typeof stopRefining === 'function') stopRefining();
   loc.manualAddress = false;
   if(reminderCheckInterval){ clearInterval(reminderCheckInterval); reminderCheckInterval=null; }
@@ -317,6 +406,9 @@ function doLogout(){
   state.orders = [];
   state.reminders = [];
   state.pointsInfo = { pending: 0, coupons: [], history: [] };
+  state.notifications = { unread: 0, items: [] };
+  state.priceAlerts = [];
+  closeMedicine();
   $('app').classList.add('hidden');
   showView('login');
   $('login-pass').value='';
@@ -331,12 +423,14 @@ async function enterApp(session){
 
   // Carrega do banco os dados desta conta.
   try{
-    const [orders, reminders, pointsInfo] = await Promise.all([
-      api.orders(), api.reminders(), api.points(),
+    const [orders, reminders, pointsInfo, notifications, alerts] = await Promise.all([
+      api.orders(), api.reminders(), api.points(), api.notifications(), api.priceAlerts(),
     ]);
     setOrders(orders);
     state.reminders = reminders;
     applyPointsInfo(pointsInfo);
+    state.notifications = notifications;
+    state.priceAlerts = alerts;
   }catch(e){
     showToast(e.message);
   }
@@ -346,10 +440,9 @@ async function enterApp(session){
   $('app').classList.remove('hidden');
 
   refreshProfileUI();
-  $('settings-pass-section').classList.toggle('hidden', !!state.user.googleAccount);
-  $('settings-pass-google-note').classList.toggle('hidden', !state.user.googleAccount);
   updatePointsUI();
   updateOrdersBadge();
+  updateNotificationsBadge();
   updateCartUI();
   startReminderEngine();
   switchTab('home');
@@ -368,6 +461,11 @@ function refreshProfileUI(){
   $('settings-email').value = state.user.email;
   $('sidebar-name').textContent = state.user.name;
   $('reset-google-photo').classList.toggle('hidden', !(state.user.hasGooglePhoto && state.user.avatarCustom));
+
+  // Conta do Google que criou uma senha (pela recuperação) também troca a senha aqui.
+  const managedByGoogle = state.user.googleAccount && !state.user.hasPassword;
+  $('settings-pass-section').classList.toggle('hidden', managedByGoogle);
+  $('settings-pass-google-note').classList.toggle('hidden', !managedByGoogle);
 }
 
 function openWelcomePopup(){
@@ -412,7 +510,8 @@ function switchTab(id){
   if(id==='scanner') startScanner();
   else stopScanner();
   if(id==='calendar'){ renderCalendar(); requestNotificationPermission(); }
-  if(id==='orders') renderOrders();
+  if(id==='orders'){ renderOrders(); startOrdersPolling(); syncOrders(); }
+  else stopOrdersPolling();
   if(id==='points'){ renderPoints(); refreshPoints(); }
   if(id==='home') renderResults();
   updateCartUI();
@@ -539,6 +638,57 @@ function rxBadge(){
   return `<span class="rx-badge" title="Precisa de receita médica">${ICON_RX}Exige receita</span>`;
 }
 
+/* ---------------- genérico equivalente ----------------
+   Equivalentes são remédios com o MESMO princípio ativo, a MESMA dosagem e a
+   mesma forma (o servidor monta esse grupo em med.equivGroup). A comparação é
+   pelo preço por unidade — "por comprimido" —, porque as caixas têm tamanhos
+   diferentes. A troca sempre precisa do OK do farmacêutico. */
+
+const lowestPrice = med => {
+  const values = Object.values(med.prices || {});
+  return values.length ? Math.min(...values) : null;
+};
+
+const pricePerUnit = med => {
+  const lowest = lowestPrice(med);
+  return lowest === null ? null : lowest / (med.units || 1);
+};
+
+const formatPerUnit = med => {
+  const unit = pricePerUnit(med);
+  return unit === null ? '' : `${formatBRL(unit)} por ${med.unitLabel || 'unidade'}`;
+};
+
+function equivalentsOf(med){
+  if(!med || !med.equivGroup) return [];
+  return allMeds()
+    .filter(other => other.id !== med.id && other.equivGroup === med.equivGroup && lowestPrice(other) !== null)
+    .sort((a, b) => pricePerUnit(a) - pricePerUnit(b));
+}
+
+// Equivalente pelo menos 5% mais barato por unidade (abaixo disso não vale avisar).
+function cheaperEquivalent(med){
+  const current = pricePerUnit(med);
+  if(current === null) return null;
+  const best = equivalentsOf(med)[0];
+  if(!best) return null;
+  const unit = pricePerUnit(best);
+  return unit < current * 0.95
+    ? { med: best, unit, savingPercent: Math.round((1 - unit / current) * 100) }
+    : null;
+}
+
+function equivStripHtml(med){
+  const cheaper = cheaperEquivalent(med);
+  if(!cheaper) return '';
+  const label = cheaper.med.generic ? 'Genérico equivalente' : 'Equivalente mais barato';
+  return `<button class="equiv-strip" onclick="openMedicine('${cheaper.med.id}')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h10v10"/><path d="M7 17L17 7"/></svg>
+    <span><b>${label}:</b> ${escapeHtml(cheaper.med.name)} sai a ${formatPerUnit(cheaper.med)} — ${cheaper.savingPercent}% mais barato por ${escapeHtml(med.unitLabel || 'unidade')}</span>
+    <em>Ver</em>
+  </button>`;
+}
+
 function renderMedCard(med){
   const offers = pharmacyOffers(med);
   if(offers.length===0) return '';
@@ -550,20 +700,27 @@ function renderMedCard(med){
   const inCart = cartQuantity(med.id);
   const details = [med.presentation, med.ingredient].filter(Boolean).map(escapeHtml).join(' · ');
 
+  const watching = isWatchingPrice(med.id);
+
   return `
   <article class="result-card">
     <div class="result-top">
       <div class="result-med">
-        <h3>${escapeHtml(med.name)}</h3>
+        <h3><button class="med-name-btn" onclick="openMedicine('${med.id}')">${escapeHtml(med.name)}</button></h3>
         ${details ? `<div class="sub">${details}</div>` : ''}
         <div class="result-tags">
           ${med.rx ? rxBadge() : ''}
+          ${med.generic ? '<span class="gen-tag">Genérico</span>' : ''}
           ${savings > 0 ? `<span class="best-tag">Economize até ${savings}%</span>` : ''}
           ${inCart ? `<span class="incart-tag">${inCart} no carrinho</span>` : ''}
         </div>
       </div>
-      <div class="from-price"><span>a partir de</span><b>${formatBRL(best.price)}</b></div>
+      <div class="from-price">
+        <span>a partir de</span><b>${formatBRL(best.price)}</b>
+        ${med.units > 1 ? `<small>${formatPerUnit(med)}</small>` : ''}
+      </div>
     </div>
+    ${equivStripHtml(med)}
     <div class="pharm-list">
       ${shown.map(e=>`
         <div class="pharm-row ${e.id===best.id?'top':''}">
@@ -579,7 +736,14 @@ function renderMedCard(med){
         </div>
       `).join('')}
     </div>
-    ${offers.length > 4 ? `<button class="link-more" onclick="toggleMedPharmacies('${med.id}')">${expanded ? 'Ver menos farmácias' : `Ver todas as ${offers.length} farmácias`}</button>` : ''}
+    <div class="card-actions">
+      ${offers.length > 4 ? `<button class="link-more" onclick="toggleMedPharmacies('${med.id}')">${expanded ? 'Ver menos farmácias' : `Ver todas as ${offers.length} farmácias`}</button>` : ''}
+      <button class="link-more" onclick="openMedicine('${med.id}')">Histórico de preço</button>
+      <button class="watch-btn ${watching ? 'on' : ''}" onclick="togglePriceAlert('${med.id}')" title="${watching ? 'Parar de acompanhar o preço' : 'Avise quando baixar'}">
+        <svg viewBox="0 0 24 24" fill="${watching ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M18 10a6 6 0 10-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10.3 20a2 2 0 003.4 0"/></svg>
+        <span>${watching ? 'Acompanhando' : 'Avise quando baixar'}</span>
+      </button>
+    </div>
   </article>`;
 }
 
@@ -643,6 +807,9 @@ const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','A
 
 let reminderCheckInterval = null;
 
+const notificationsAllowed = () =>
+  storage.get('trifarmas-reminder-notifications') !== false;
+
 function requestNotificationPermission(){
   if('Notification' in window && Notification.permission === 'default'){
     Notification.requestPermission().then(perm=>{
@@ -650,6 +817,33 @@ function requestNotificationPermission(){
       else showToast('Notificações bloqueadas — os avisos vão aparecer aqui dentro do app.');
     });
   }
+}
+
+// Interruptor de notificações no Perfil.
+function toggleReminderNotifications(button){
+  const turningOn = !button.classList.contains('on');
+  if(!turningOn){
+    button.classList.remove('on');
+    storage.set('trifarmas-reminder-notifications', false);
+    showToast('Avisos de lembrete vão aparecer só dentro do app.');
+    return;
+  }
+  storage.set('trifarmas-reminder-notifications', true);
+  button.classList.add('on');
+  if(!('Notification' in window)){
+    showToast('Este navegador não mostra notificações — os avisos aparecem dentro do app.');
+    return;
+  }
+  if(Notification.permission === 'granted'){ showToast('Notificações ativadas!'); return; }
+  if(Notification.permission === 'denied'){
+    showToast('As notificações estão bloqueadas nas configurações do navegador para este site.');
+    return;
+  }
+  requestNotificationPermission();
+}
+
+function applyNotificationSwitch(){
+  $('settings-notif-switch').classList.toggle('on', notificationsAllowed());
 }
 
 function startReminderEngine(){
@@ -677,12 +871,25 @@ function checkDueReminders(){
   }
 }
 
-function fireReminderNotification(r){
+/* Aviso do lembrete. Com o app instalado (PWA), a notificação sai pelo service
+   worker — aparece como a de qualquer aplicativo, mesmo com o app em segundo
+   plano. Sem permissão, o aviso aparece dentro do app. */
+async function fireReminderNotification(r){
   const title = 'Hora do remédio';
   const body = `${r.med} — ${r.time}`;
-  if('Notification' in window && Notification.permission === 'granted'){
+  const options = {
+    body,
+    icon: 'assets/icon-192.png',
+    badge: 'assets/icon-192.png',
+    tag: `lembrete-${r.id}`,
+    lang: 'pt-BR',
+    vibrate: [120, 60, 120],
+  };
+  if(notificationsAllowed() && 'Notification' in window && Notification.permission === 'granted'){
     try{
-      new Notification(title, {body, icon: 'assets/favicon.png'});
+      const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+      if(registration){ await registration.showNotification(title, options); return; }
+      new Notification(title, options);
       return;
     }catch{ /* cai no aviso interno abaixo */ }
   }
@@ -864,6 +1071,59 @@ async function saveSettings(){
   }
 }
 
+/* ---------------- meus dados (LGPD) ---------------- */
+
+// Baixa tudo o que a conta tem no banco, num arquivo JSON.
+async function downloadMyData(){
+  try{
+    showToast('Preparando seus dados…');
+    const data = await api.exportMyData();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `trifarmas-meus-dados-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 10000);
+    showToast('Download iniciado.');
+  }catch(e){
+    showToast(e.message);
+  }
+}
+
+let deleteAccountInput = '';
+
+function confirmDeleteAccount(){
+  deleteAccountInput = '';
+  const needsPassword = !!state.user.hasPassword;
+  showModal(ICON_WARN, 'Excluir minha conta',
+    `Isso apaga <b>para sempre</b> sua conta, pedidos, receitas anexadas, pontos, cupons, lembretes e avisos de preço.
+     <label class="modal-field">${needsPassword ? 'Digite sua senha para confirmar' : 'Digite <b>EXCLUIR</b> para confirmar'}
+       <input type="${needsPassword ? 'password' : 'text'}" autocomplete="off"
+              placeholder="${needsPassword ? '••••••••' : 'EXCLUIR'}" oninput="deleteAccountInput = this.value">
+     </label>`,
+    [
+      { label: 'Excluir minha conta', danger: true, onClick: deleteAccountNow },
+      { label: 'Cancelar' },
+    ],
+    { tone: 'danger' });
+}
+
+async function deleteAccountNow(){
+  const value = deleteAccountInput;
+  try{
+    await api.deleteAccount(state.user.hasPassword ? { password: value } : { confirm: value });
+    clearCart();
+    doLogout();
+    showModal(ICON_CHECK, 'Conta excluída',
+      'Seus dados foram apagados do Trifarmas. Obrigado por ter usado o app — se quiser voltar, basta criar uma conta nova.');
+  }catch(e){
+    showToast(e.message);
+  }
+}
+
 /* ---------------- toasts / modais ---------------- */
 
 let toastTimer=null;
@@ -888,14 +1148,16 @@ function showModal(iconSvg, title, bodyHtml, buttons = [{ label:'Entendi', prima
   const actions = back.querySelector('.modal-actions');
   buttons.forEach(b=>{
     const btn = document.createElement('button');
-    btn.className = b.primary ? 'btn btn-primary' : 'btn btn-ghost';
+    btn.className = b.danger ? 'btn btn-danger' : (b.primary ? 'btn btn-primary' : 'btn btn-ghost');
     btn.textContent = b.label;
     btn.onclick = ()=>{ back.remove(); if(b.onClick) b.onClick(); };
     actions.appendChild(btn);
   });
   back.onclick = (e)=>{ if(e.target===back) back.remove(); };
   document.body.appendChild(back);
-  actions.querySelector('button').focus();
+  // Quando o modal pede algo escrito (confirmar exclusão), o foco vai para o campo.
+  const field = back.querySelector('input');
+  (field || actions.querySelector('button')).focus();
   return back;
 }
 
@@ -912,7 +1174,9 @@ function initApp(){
   buildNav();
   applyTheme(storage.get('trifarmas-theme') === 'dark' ? 'dark' : 'light');
   applyFontScale(Number(storage.get('trifarmas-font-scale')) || 1);
+  applyNotificationSwitch();
   showView('login');
   initGoogleSignIn();
   loadCatalog();
+  registerServiceWorker();
 }
