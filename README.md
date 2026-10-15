@@ -146,7 +146,7 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
 <table>
   <tr>
     <td align="center">
-              <img src="frontend/assets/logo-time-white.png" alt="Trifarmas" width="100px">
+              <img src="frontend/assets/logo-time-white-big.png" alt="Trifarmas" width="100px">
       </a>
     </td>
      <td align="center">
