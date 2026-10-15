@@ -147,7 +147,7 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
       <a href="https://github.com/SEU-USUARIO" title="Perfil no GitHub">
         <img src="frontend/assets/favicon.png" width="100px;" alt="Logo do Time Trifarmas"/><br>
         <sub>
-          <img src="frontend/assets/logo.png" alt="Trifarmas" width="20px">
+          <img src="frontend/assets/logo.png" alt="Trifarmas" width="80px">
         </sub>
       </a>
     </td>
