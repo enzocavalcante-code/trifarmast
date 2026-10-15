@@ -144,11 +144,8 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
 <table>
   <tr>
     <td align="center">
-      <a href="https://github.com/SEU-USUARIO" title="Perfil no GitHub">
-        <img src="frontend/assets/favicon.png" width="100px;" alt="Logo do Time Trifarmas"/><br>
-        <sub>
-          <img src="frontend/assets/logo.png" alt="Trifarmas" width="80px">
-        </sub>
+      <a href="https://github.com/enzocavalcante-code" title="Perfil no GitHub">
+              <img src="frontend/assets/logo.png" alt="Trifarmas" width="80px">
       </a>
     </td>
 
