@@ -3,11 +3,14 @@ const { query, transaction } = require('../db');
 const { HttpError, asyncHandler } = require('../errors');
 const { parseDataUrl } = require('../images');
 const { pointsForPayment, addPoints } = require('../points');
+const { quoteDelivery, randomCourier, MAX_DELIVERY_KM } = require('../delivery');
 const serialize = require('../serializers');
 
 const router = express.Router();
 
-const PAYMENT_METHODS = ['Pix', 'Cartão de crédito', 'Dinheiro na retirada'];
+const PAYMENT_METHODS = ['Pix', 'Cartão de crédito', 'Dinheiro na retirada', 'Dinheiro na entrega'];
+const FULFILLMENTS = ['pickup', 'delivery'];
+const MAX_ADDRESS_LENGTH = 200;
 const MAX_ITEMS = 30;
 const MAX_QUANTITY = 10;
 const PRESCRIPTION_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
@@ -72,6 +75,22 @@ router.post('/', asyncHandler(async (req, res) => {
   if (!PAYMENT_METHODS.includes(paymentMethod)) throw new HttpError(400, 'Escolha uma forma de pagamento.');
   const quantities = normalizeItems(req.body.items);
 
+  // Entrega por motoboy ou retirada no balcão. A taxa é calculada no servidor.
+  const fulfillment = FULFILLMENTS.includes(req.body.fulfillment) ? req.body.fulfillment : 'pickup';
+  const isDelivery = fulfillment === 'delivery';
+  if (paymentMethod === 'Dinheiro na entrega' && !isDelivery) throw new HttpError(400, 'Escolha uma forma de pagamento.');
+  if (paymentMethod === 'Dinheiro na retirada' && isDelivery) throw new HttpError(400, 'Escolha uma forma de pagamento.');
+
+  let delivery = null;
+  if (isDelivery) {
+    const address = String(req.body.deliveryAddress || '').trim().replace(/\s+/g, ' ');
+    if (address.length < 8) throw new HttpError(400, 'Informe o endereço de entrega (rua, número e bairro).');
+    const quote = quoteDelivery(req.body.distanceKm);
+    if (!quote) throw new HttpError(400, 'Não foi possível calcular a entrega. Ative sua localização e tente de novo.');
+    if (quote.outOfRange) throw new HttpError(400, `Esta farmácia entrega em até ${MAX_DELIVERY_KM} km. Escolha outra farmácia ou retire no balcão.`);
+    delivery = { ...quote, address: address.slice(0, MAX_ADDRESS_LENGTH), courier: randomCourier() };
+  }
+
   const order = await transaction(async client => {
     const { rows: [pharmacy] } = await client.query('SELECT id, name FROM pharmacies WHERE id = $1', [pharmacyId]);
     if (!pharmacy) throw new HttpError(404, 'Farmácia não encontrada.');
@@ -103,16 +122,25 @@ router.post('/', asyncHandler(async (req, res) => {
       discount = Math.min(Number(coupon.amount), subtotal);
     }
 
-    const paidAmount = +(subtotal - discount).toFixed(2);
+    const deliveryFee = delivery ? delivery.fee : 0;
+    const merchandise = +(subtotal - discount).toFixed(2);
+    const paidAmount = +(merchandise + deliveryFee).toFixed(2);
     const summary = items.length === 1 ? items[0].name : `${items[0].name} e mais ${items.length - 1}`;
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
     const { rows: [created] } = await client.query(
       `INSERT INTO orders (user_id, pharmacy_id, pharmacy_name, medicine_name, price, subtotal, discount, coupon_name,
-                           paid_amount, payment_method, points_earned, pickup_code, requires_prescription)
-       VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+                           paid_amount, payment_method, points_earned, pickup_code, requires_prescription,
+                           fulfillment, delivery_fee, delivery_address, delivery_km, delivery_minutes,
+                           courier_name, courier_vehicle, courier_plate, courier_rating)
+       VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING id`,
+      // Os pontos saem do valor dos remédios: a taxa de entrega não gera pontos.
       [req.userId, pharmacy.id, pharmacy.name, summary, subtotal, discount, coupon ? coupon.name : null,
-       paidAmount, paymentMethod, pointsForPayment(paidAmount), code, requiresPrescription]
+       paidAmount, paymentMethod, pointsForPayment(merchandise), code, requiresPrescription,
+       fulfillment, deliveryFee, delivery ? delivery.address : null, delivery ? delivery.km : null,
+       delivery ? delivery.minutes : null, delivery ? delivery.courier.name : null,
+       delivery ? delivery.courier.vehicle : null, delivery ? delivery.courier.plate : null,
+       delivery ? delivery.courier.rating : null]
     );
     await client.query(
       `INSERT INTO order_items (order_id, medicine_id, name, presentation, quantity, unit_price, requires_prescription)
@@ -177,18 +205,25 @@ router.get('/:id/prescription', asyncHandler(async (req, res) => {
   res.json({ fileName: file.file_name, mime: file.mime, data: file.data });
 }));
 
-// Confirma a retirada e credita os pontos.
+// Confirma a retirada no balcão (ou o recebimento em casa) e credita os pontos.
 router.post('/:id/pickup', asyncHandler(async (req, res) => {
   const result = await transaction(async client => {
     const { rows: [row] } = await client.query(
       'SELECT * FROM orders WHERE id = $1 AND user_id = $2 FOR UPDATE', [req.params.id, req.userId]
     );
     if (!row) throw new HttpError(404, 'Pedido não encontrado.');
-    if (serialize.orderStatus(row) !== serialize.STATUS.READY) throw new HttpError(400, 'O pedido ainda não está pronto para retirada.');
+    if (serialize.orderStatus(row) !== serialize.handoverStatus(row)) {
+      throw new HttpError(400, serialize.isDelivery(row)
+        ? 'O motoboy ainda não chegou no seu endereço.'
+        : 'O pedido ainda não está pronto para retirada.');
+    }
 
     await client.query('UPDATE orders SET completed = TRUE WHERE id = $1', [row.id]);
+    const description = serialize.isDelivery(row)
+      ? `Pedido #${row.id} entregue (${row.pharmacy_name})`
+      : `Pedido #${row.id} retirado na ${row.pharmacy_name}`;
     const points = row.points_earned > 0
-      ? await addPoints(client, req.userId, row.points_earned, `Pedido #${row.id} retirado na ${row.pharmacy_name}`)
+      ? await addPoints(client, req.userId, row.points_earned, description)
       : (await client.query('SELECT points FROM users WHERE id = $1', [req.userId])).rows[0].points;
     return { order: await loadOrder(client, req.userId, row.id), points };
   });

@@ -87,6 +87,16 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_name              TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS requires_prescription    BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS prescription_choice      TEXT;         -- 'upload' | 'in_person'
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS prescription_resolved_at TIMESTAMPTZ;
+-- Entrega por motoboy (simulada). Pedidos antigos continuam como retirada.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment              TEXT NOT NULL DEFAULT 'pickup';  -- 'pickup' | 'delivery'
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_fee             NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address         TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_km              NUMERIC(5,2);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_minutes         SMALLINT;      -- prazo prometido ao cliente
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_name             TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_vehicle          TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_plate            TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_rating           NUMERIC(2,1);
 CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS order_items (

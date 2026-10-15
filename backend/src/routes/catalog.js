@@ -1,6 +1,7 @@
 const express = require('express');
 const { query } = require('../db');
 const { asyncHandler } = require('../errors');
+const { BANDS, MAX_DELIVERY_KM } = require('../delivery');
 
 const router = express.Router();
 
@@ -47,6 +48,8 @@ router.get('/catalog', asyncHandler(async (req, res) => {
     rewards: rewards.rows.map(r => ({
       id: r.id, name: r.name, desc: r.description, cost: r.cost, amount: Number(r.amount), minOrder: Number(r.min_order),
     })),
+    // Tabela da entrega por motoboy: o app mostra a taxa usando as mesmas faixas do servidor.
+    delivery: { maxKm: MAX_DELIVERY_KM, bands: BANDS },
   });
 }));
 
