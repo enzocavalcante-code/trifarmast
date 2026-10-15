@@ -165,6 +165,18 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
               <img src="frontend/assets/vinicius.jfif" alt="vini" width="100px">
       </a>
     </td>
+      </td>
+       <td align="center">
+      <a href="https://github.com/" title="Perfil no GitHub">
+              <img src="frontend/assets/said.jfif" alt="said" width="100px">
+      </a>
+    </td>
+      </td>
+       <td align="center">
+      <a href="https://github.com/" title="Perfil no GitHub">
+              <img src="frontend/assets/anselmo.jfif" alt="anselmo" width="100px">
+      </a>
+    </td>
   </tr>
 </table>
 
