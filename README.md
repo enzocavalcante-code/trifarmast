@@ -1,7 +1,7 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo.png">
-    <img src="frontend/assets/logo.png" alt="Trifarmas" width="400">
+    <img src="frontend/assets/logo.png" alt="Trifarmas" width="300">
   </picture>
 </div>
 
