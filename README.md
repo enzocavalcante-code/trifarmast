@@ -165,13 +165,6 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
   </tr>
 </table>
 
-## 😄 Seja um dos contribuidores
-
-Quer fazer parte desse projeto? Veja [como contribuir](#-contribuindo-para-o-trifarmas) e abra a sua solicitação de pull.
-
-## 📝 Licença
-
-Esse projeto está sob a licença MIT. Veja o arquivo [LICENSE.md](LICENSE.md) para mais detalhes.
 
 ---
 
