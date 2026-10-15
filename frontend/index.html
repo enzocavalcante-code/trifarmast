@@ -23,7 +23,12 @@
     </div>
     <div id="login-error" class="auth-error hidden"></div>
     <div class="field"><label for="login-email">E-mail</label><input id="login-email" type="email" autocomplete="email" placeholder="voce@email.com" value="trifarmas@gmail.com"></div>
-    <div class="field"><label for="login-pass">Senha</label><input id="login-pass" type="password" autocomplete="current-password" placeholder="••••••••" value="123456" onkeydown="if(event.key==='Enter') doLogin()"></div>
+    <div class="field"><label for="login-pass">Senha</label>
+      <div class="pass-wrap">
+        <input id="login-pass" type="password" autocomplete="current-password" placeholder="••••••••" value="123456" onkeydown="if(event.key==='Enter') doLogin()">
+        <button type="button" class="pass-toggle" data-for="login-pass" onclick="togglePassword(this)" aria-label="Mostrar senha" title="Mostrar senha"></button>
+      </div>
+    </div>
     <button class="btn btn-primary" onclick="doLogin()">Entrar</button>
     <div class="or-divider"><span>ou</span></div>
     <div id="google-btn-login" class="google-btn-wrap"></div>
@@ -44,7 +49,12 @@
     </div>
     <div class="field"><label for="signup-name">Nome completo</label><input id="signup-name" type="text" autocomplete="name" placeholder="Seu nome"></div>
     <div class="field"><label for="signup-email">E-mail</label><input id="signup-email" type="email" autocomplete="email" placeholder="voce@email.com"></div>
-    <div class="field"><label for="signup-pass">Senha</label><input id="signup-pass" type="password" autocomplete="new-password" placeholder="Mínimo de 6 caracteres"></div>
+    <div class="field"><label for="signup-pass">Senha</label>
+      <div class="pass-wrap">
+        <input id="signup-pass" type="password" autocomplete="new-password" placeholder="Mínimo de 6 caracteres" onkeydown="if(event.key==='Enter') doSignup()">
+        <button type="button" class="pass-toggle" data-for="signup-pass" onclick="togglePassword(this)" aria-label="Mostrar senha" title="Mostrar senha"></button>
+      </div>
+    </div>
     <button class="btn btn-primary" onclick="doSignup()">Criar conta</button>
     <div class="or-divider"><span>ou</span></div>
     <div id="google-btn-signup" class="google-btn-wrap"></div>
@@ -139,17 +149,24 @@
       <!-- ---- SCANNER ---- -->
       <section id="tab-scanner" class="hidden">
         <div class="section-head"><h2>Escanear remédio</h2><p>Aponte a câmera para a caixa ou o código de barras.</p></div>
-        <div class="scanner-frame">
+        <div class="scanner-frame" id="scanner-frame">
           <video id="scanner-video" autoplay playsinline muted></video>
-          <div class="scan-guide">
+          <div class="scan-guide" id="scan-guide">
             <div class="scan-corner tl"></div><div class="scan-corner tr"></div>
             <div class="scan-corner bl"></div><div class="scan-corner br"></div>
             <div class="scan-line"></div>
           </div>
+          <!-- Mensagem no lugar da imagem enquanto a câmera não está no ar -->
+          <div class="scan-overlay" id="scan-overlay">
+            <div class="scan-overlay-icon" id="scan-overlay-icon"></div>
+            <p id="scan-overlay-text">Toque em “Ligar a câmera” para começar.</p>
+            <button class="btn btn-primary" id="scan-overlay-btn" onclick="startScanner(true)">Ligar a câmera</button>
+          </div>
         </div>
-        <p class="scanner-caption" id="scanner-status">Iniciando câmera…</p>
+        <p class="scanner-caption" id="scanner-status">A câmera só liga quando você pedir.</p>
         <div class="scanner-actions">
           <button class="btn btn-primary" onclick="mockCapture()">Capturar agora</button>
+          <button class="btn btn-ghost" id="scanner-stop" onclick="stopScanner(true)" hidden>Desligar câmera</button>
         </div>
         <div class="scanner-fallback">
           <strong class="small-title">Sem câmera? Toque em um remédio:</strong>
@@ -157,27 +174,62 @@
         </div>
       </section>
 
-      <!-- ---- CALENDÁRIO ---- -->
+      <!-- ---- LEMBRETES ---- -->
       <section id="tab-calendar" class="hidden">
-        <div class="section-head"><h2>Lembretes de medicação</h2><p>Escolha um dia, horário e remédio para ser lembrado.</p></div>
-        <div class="cal-card">
-          <div class="cal-head">
-            <button class="icon-btn" onclick="calShiftMonth(-1)" aria-label="Mês anterior">‹</button>
-            <h3 id="cal-month-label"></h3>
-            <button class="icon-btn" onclick="calShiftMonth(1)" aria-label="Próximo mês">›</button>
+        <div class="section-head"><h2>Lembretes de remédio</h2><p>É só responder três perguntas. Avisamos na hora certa.</p></div>
+
+        <div class="rem-wizard">
+          <!-- 1. remédio -->
+          <div class="rem-step">
+            <div class="rem-step-head"><span class="rem-step-num">1</span><h3>Qual remédio?</h3></div>
+            <input id="rem-med" class="rem-input" type="text" autocomplete="off" placeholder="Ex: Losartana 50mg"
+                   oninput="onReminderMedInput()" onkeydown="if(event.key==='Enter') addReminder()">
+            <div class="rem-chips" id="rem-med-chips"></div>
           </div>
-          <div class="cal-grid" id="cal-grid"></div>
-          <div class="rem-form">
-            <div class="field"><label for="rem-med">Remédio</label><input id="rem-med" type="text" placeholder="Ex: Losartana 50mg"></div>
-            <div class="row-2">
-              <div class="field"><label for="rem-time">Horário</label><input id="rem-time" type="time" value="08:00"></div>
-              <div class="field"><label for="rem-repeat-display">Repetir</label>
-                <input id="rem-repeat-display" type="text" value="Somente este dia" disabled>
+
+          <!-- 2. horário -->
+          <div class="rem-step">
+            <div class="rem-step-head"><span class="rem-step-num">2</span><h3>Que horas?</h3></div>
+            <div class="time-picker">
+              <button class="time-step" onclick="shiftReminderTime(-30)" aria-label="Meia hora antes">−</button>
+              <div class="time-value">
+                <b id="rem-time-label">08:00</b>
+                <span id="rem-time-period">da manhã</span>
               </div>
+              <button class="time-step" onclick="shiftReminderTime(30)" aria-label="Meia hora depois">+</button>
             </div>
-            <button class="btn btn-primary" onclick="addReminder()">Definir lembrete</button>
+            <div class="rem-chips" id="rem-time-chips"></div>
+            <label class="rem-exact">
+              <span>Escolher outro horário</span>
+              <input id="rem-time" type="time" value="08:00" onchange="setReminderTime(this.value)">
+            </label>
+          </div>
+
+          <!-- 3. dia -->
+          <div class="rem-step">
+            <div class="rem-step-head"><span class="rem-step-num">3</span><h3>A partir de quando?</h3></div>
+            <div class="rem-chips" id="rem-day-chips"></div>
+            <div class="cal-card hidden" id="rem-calendar">
+              <div class="cal-head">
+                <button class="icon-btn" onclick="calShiftMonth(-1)" aria-label="Mês anterior">‹</button>
+                <h3 id="cal-month-label"></h3>
+                <button class="icon-btn" onclick="calShiftMonth(1)" aria-label="Próximo mês">›</button>
+              </div>
+              <div class="cal-grid" id="cal-grid"></div>
+            </div>
+            <div class="rem-repeat">
+              <p>Tomar por quantos dias?</p>
+              <div class="rem-chips" id="rem-repeat-chips"></div>
+            </div>
+          </div>
+
+          <div class="rem-confirm">
+            <p id="rem-summary" class="rem-summary"></p>
+            <button class="btn btn-primary btn-big" id="rem-save" onclick="addReminder()">Criar lembrete</button>
           </div>
         </div>
+
+        <h3 class="list-title">Seus lembretes</h3>
         <div class="rem-list" id="rem-list"></div>
       </section>
 
@@ -232,9 +284,24 @@
           <div id="settings-pass-error" class="auth-error hidden"></div>
           <div id="settings-pass-section">
             <div class="pass-divider">Alterar senha</div>
-            <div class="field"><label for="settings-pass-current">Senha atual</label><input id="settings-pass-current" type="password" autocomplete="current-password" placeholder="Confirme sua senha atual"></div>
-            <div class="field"><label for="settings-pass">Nova senha</label><input id="settings-pass" type="password" autocomplete="new-password" placeholder="Deixe em branco para não alterar"></div>
-            <div class="field"><label for="settings-pass-confirm">Confirmar nova senha</label><input id="settings-pass-confirm" type="password" autocomplete="new-password" placeholder="Repita a nova senha"></div>
+            <div class="field"><label for="settings-pass-current">Senha atual</label>
+              <div class="pass-wrap">
+                <input id="settings-pass-current" type="password" autocomplete="current-password" placeholder="Confirme sua senha atual">
+                <button type="button" class="pass-toggle" data-for="settings-pass-current" onclick="togglePassword(this)" aria-label="Mostrar senha" title="Mostrar senha"></button>
+              </div>
+            </div>
+            <div class="field"><label for="settings-pass">Nova senha</label>
+              <div class="pass-wrap">
+                <input id="settings-pass" type="password" autocomplete="new-password" placeholder="Deixe em branco para não alterar">
+                <button type="button" class="pass-toggle" data-for="settings-pass" onclick="togglePassword(this)" aria-label="Mostrar senha" title="Mostrar senha"></button>
+              </div>
+            </div>
+            <div class="field"><label for="settings-pass-confirm">Confirmar nova senha</label>
+              <div class="pass-wrap">
+                <input id="settings-pass-confirm" type="password" autocomplete="new-password" placeholder="Repita a nova senha">
+                <button type="button" class="pass-toggle" data-for="settings-pass-confirm" onclick="togglePassword(this)" aria-label="Mostrar senha" title="Mostrar senha"></button>
+              </div>
+            </div>
           </div>
           <div id="settings-pass-google-note" class="google-account-note hidden">
             <svg viewBox="0 0 48 48" width="16" height="16"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.6 29.3 35.5 24 35.5c-6.4 0-11.7-4.6-12.8-10.8-.2-1-.2-2 0-3C12.3 15.6 17.6 11 24 11c3.1 0 5.9 1.2 8 3.1l6-6C34.6 4.9 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.2-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.7 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l6-6C34.6 6.9 29.6 5 24 5c-7.6 0-14.1 4.3-17.7 10.7z"/><path fill="#4CAF50" d="M24 45c5.5 0 10.4-1.8 14.2-4.9l-6.6-5.5C29.6 36.4 26.9 37.5 24 37.5c-5.3 0-9.7-2.9-11.3-7.4l-6.6 5.1C9.7 41 16.3 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l6.6 5.5C38.9 40.8 45 35.5 45 24c0-1.2-.1-2.3-.4-3.5z"/></svg>

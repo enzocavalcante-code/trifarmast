@@ -29,6 +29,26 @@ backend/   src/ (server, rotas, auth, pontos, geo) · db/schema.sql · db/catalo
 - Contas novas começam com 0 pontos (sem bônus de cadastro).
 - Pontos são trocados por cupons (aba Pontos) e o cupom é escolhido na tela de pagamento.
 
+## Lembretes de remédio
+A tela foi feita pensando em quem tem pressa ou pouca intimidade com celular:
+três perguntas curtas, botões grandes e um resumo em português antes de criar.
+- **1. Qual remédio?** dá para digitar ou tocar num remédio já comprado.
+- **2. Que horas?** atalhos de manhã/almoço/tarde/noite, botões − e + de meia em
+  meia hora e, para quem quiser, o horário exato.
+- **3. A partir de quando?** hoje, amanhã ou um dia no calendário — e a opção de
+  repetir por 7, 15 ou 30 dias, criando todos os lembretes de uma vez.
+- Na lista, dias seguidos do mesmo remédio aparecem juntos ("de 14 a 20 de
+  outubro · 7 dias") e são apagados de uma vez só.
+- O aviso usa a hora do aparelho e aparece enquanto o app estiver aberto.
+
+## Senha e câmera
+- Todo campo de senha tem o botão de olho para ver o que está sendo digitado
+  (login, criar conta e troca de senha no perfil).
+- O scanner só liga a câmera quando você pede (ou sozinho, se a permissão já
+  tiver sido dada antes), mostra o que está acontecendo — abrindo, no ar, sem
+  permissão, câmera ocupada — e tem botão de tentar de novo. Ao desligar ou sair
+  da aba, a imagem é limpa, então a tela nunca fica congelada.
+
 ## Mapa e localização
 - Imagens do mapa (no navegador): Leaflet + OpenStreetMap (reserva: OpenStreetMap França).
 - Sem GPS (bloqueado ou indisponível), a API estima a localização pela internet (`/api/places/approximate`: ipwho.is, freeipapi, ipapi.co).

@@ -103,6 +103,38 @@ function applyLogo(){
   document.querySelectorAll('.app-logo-img').forEach(img=> img.src = LOGO_SRC);
 }
 
+/* ---------------- ver a senha ----------------
+   Cada campo de senha tem um botão de olho ao lado. Mostrar a senha ajuda
+   muita gente a não errar a digitação — principalmente no celular. */
+
+const ICON_EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const ICON_EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.6 6.2A9.8 9.8 0 0112 6c6.4 0 10 7 10 7a17 17 0 01-3.2 4M6.6 6.6A17 17 0 002 13s3.6 7 10 7a9.7 9.7 0 005.4-1.6"/><path d="M9.9 9.9a3 3 0 004.2 4.2"/><path d="M3 3l18 18"/></svg>';
+
+function togglePassword(button){
+  const input = $(button.dataset.for);
+  if(!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  button.innerHTML = show ? ICON_EYE_OFF : ICON_EYE;
+  button.classList.toggle('on', show);
+  const label = show ? 'Ocultar senha' : 'Mostrar senha';
+  button.setAttribute('aria-label', label);
+  button.setAttribute('title', label);
+  // volta o cursor para o fim do que já foi digitado
+  input.focus();
+  try{ input.setSelectionRange(input.value.length, input.value.length); }catch{ /* alguns navegadores não permitem */ }
+}
+
+// Desenha o olho em todos os campos de senha ao abrir o app.
+function setupPasswordToggles(){
+  document.querySelectorAll('.pass-toggle').forEach(button=>{
+    button.innerHTML = ICON_EYE;
+    button.classList.remove('on');
+    const input = $(button.dataset.for);
+    if(input) input.type = 'password';
+  });
+}
+
 function showView(name){
   $('view-login').classList.toggle('hidden', name!=='login');
   $('view-signup').classList.toggle('hidden', name!=='signup');
@@ -411,7 +443,7 @@ function switchTab(id){
   if(id==='map') initMap();
   if(id==='scanner') startScanner();
   else stopScanner();
-  if(id==='calendar'){ renderCalendar(); requestNotificationPermission(); }
+  if(id==='calendar') renderReminders();
   if(id==='orders') renderOrders();
   if(id==='points'){ renderPoints(); refreshPoints(); }
   if(id==='home') renderResults();
@@ -585,33 +617,196 @@ function renderMedCard(med){
 
 /* ---------------- scanner ---------------- */
 
+/* A câmera é a parte mais frágil do app: pode estar sem permissão, em uso por
+   outro aplicativo ou parar sozinha quando o celular é bloqueado. Por isso a
+   tela sempre mostra em que pé está e dá um caminho de saída — nunca fica
+   parada numa imagem congelada. */
+
 let scannerStream = null;
-async function startScanner(){
-  const video = $('scanner-video');
-  const status = $('scanner-status');
+let scannerStarting = false;
+let scannerTimer = null;
+
+const ICON_CAMERA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8a2 2 0 012-2h2.5l1.2-2h6.6l1.2 2H20a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><circle cx="12" cy="12.5" r="3.5"/></svg>';
+const ICON_CAMERA_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8a2 2 0 012-2h2M10 6h4.3l1.2 2H20a2 2 0 012 2v7M3 12v5a2 2 0 002 2h12"/><path d="M3 3l18 18"/></svg>';
+
+const SCANNER_STATES = {
+  off: {
+    icon: ICON_CAMERA,
+    text: 'A câmera fica desligada até você pedir.',
+    button: 'Ligar a câmera',
+    caption: 'Sem câmera? Escolha um remédio na lista abaixo.',
+  },
+  loading: {
+    icon: ICON_CAMERA,
+    text: 'Abrindo a câmera…',
+    button: '',
+    caption: 'Se o navegador perguntar, toque em "Permitir".',
+  },
+  live: { icon: '', text: '', button: '', caption: 'Aponte para o código de barras ou a caixa do remédio.' },
+};
+
+function setScannerUI(stateName, custom = {}){
+  const frame = $('scanner-frame');
+  if(!frame) return;
+  const preset = { ...(SCANNER_STATES[stateName] || SCANNER_STATES.off), ...custom };
+  const live = stateName === 'live';
+  frame.dataset.state = stateName;
+  $('scan-overlay').classList.toggle('hidden', live);
+  $('scan-guide').classList.toggle('hidden', !live);
+  $('scanner-stop').hidden = !live;
+  $('scan-overlay-icon').innerHTML = preset.icon || '';
+  $('scan-overlay-text').textContent = preset.text || '';
+  const button = $('scan-overlay-btn');
+  button.textContent = preset.button || '';
+  button.classList.toggle('hidden', !preset.button);
+  $('scanner-status').textContent = preset.caption || '';
+}
+
+// Mensagem clara para cada motivo de a câmera não abrir.
+function scannerErrorMessage(error){
+  const name = error && error.name;
+  if(name === 'NotAllowedError' || name === 'SecurityError'){
+    return 'Você não autorizou o uso da câmera. Toque no cadeado ao lado do endereço do site e permita a câmera.';
+  }
+  if(name === 'NotFoundError' || name === 'DevicesNotFoundError'){
+    return 'Não encontramos nenhuma câmera neste aparelho.';
+  }
+  if(name === 'NotReadableError' || name === 'TrackStartError'){
+    return 'A câmera está sendo usada por outro aplicativo. Feche o outro app e tente de novo.';
+  }
+  return 'Não foi possível abrir a câmera agora.';
+}
+
+function showScannerError(message){
+  stopScannerStream();
+  setScannerUI('error', {
+    icon: ICON_CAMERA_OFF,
+    text: message,
+    button: 'Tentar de novo',
+    caption: 'Você também pode escolher um remédio na lista abaixo.',
+  });
+}
+
+// Tenta a câmera traseira (celular); se não houver, usa qualquer câmera.
+async function requestCamera(){
+  try{
+    return await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+  }catch(error){
+    if(error && (error.name === 'OverconstrainedError' || error.name === 'NotFoundError')){
+      return navigator.mediaDevices.getUserMedia({ video: true });
+    }
+    throw error;
+  }
+}
+
+/* userAsked=false acontece ao abrir a aba: só liga sozinho se a permissão da
+   câmera já tiver sido dada antes. */
+async function startScanner(userAsked = false){
   buildScannerMockList();
-  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    status.textContent = 'Este navegador não permite acesso à câmera — escolha um remédio abaixo.';
+  if(scannerStream || scannerStarting) return;
+
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.isSecureContext){
+    setScannerUI('error', {
+      icon: ICON_CAMERA_OFF,
+      text: 'Este navegador não libera a câmera para o site.',
+      button: '',
+      caption: 'Escolha um remédio na lista abaixo.',
+    });
     return;
   }
-  try{
-    // Tenta a câmera traseira (celular) primeiro; se não existir (ex: notebook), usa a câmera padrão.
-    scannerStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
-  }catch{
-    try{
-      scannerStream = await navigator.mediaDevices.getUserMedia({video:true});
-    }catch{
-      status.textContent = 'Não foi possível acessar sua câmera — verifique a permissão do navegador ou escolha um remédio abaixo.';
-      return;
-    }
+
+  if(!userAsked && !(await cameraAlreadyAllowed())){
+    setScannerUI('off');
+    return;
   }
-  if(state.activeTab !== 'scanner'){ stopScanner(); return; }
-  video.srcObject = scannerStream;
-  status.textContent = 'Aponte para o código de barras ou a caixa do remédio.';
+
+  scannerStarting = true;
+  setScannerUI('loading');
+  let stream;
+  try{
+    stream = await requestCamera();
+  }catch(error){
+    scannerStarting = false;
+    showScannerError(scannerErrorMessage(error));
+    return;
+  }
+  scannerStarting = false;
+
+  // O usuário pode ter saído da aba enquanto a permissão era pedida.
+  if(state.activeTab !== 'scanner'){
+    stream.getTracks().forEach(track => track.stop());
+    setScannerUI('off');
+    return;
+  }
+
+  scannerStream = stream;
+  const video = $('scanner-video');
+  video.srcObject = stream;
+  video.onplaying = () => {
+    clearTimeout(scannerTimer);
+    setScannerUI('live');
+  };
+  // Se a câmera for interrompida (bloqueio de tela, outro app), avisa.
+  stream.getVideoTracks().forEach(track => { track.onended = () => showScannerError('A câmera foi interrompida.'); });
+
+  try{
+    await video.play();
+  }catch{ /* alguns navegadores só liberam depois de um toque — o botão já é um toque */ }
+
+  if(video.readyState >= 2) setScannerUI('live');
+  clearTimeout(scannerTimer);
+  scannerTimer = setTimeout(()=>{
+    if(scannerStream && video.readyState < 2) showScannerError('A câmera não respondeu. Tente de novo.');
+  }, 10000);
 }
-function stopScanner(){
-  if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream=null; }
+
+// Já autorizada antes? Então pode abrir sozinha ao entrar na aba.
+async function cameraAlreadyAllowed(){
+  try{
+    if(!navigator.permissions || !navigator.permissions.query) return false;
+    const status = await navigator.permissions.query({ name: 'camera' });
+    return status.state === 'granted';
+  }catch{
+    return false; // navegador sem essa consulta (Safari): espera o toque
+  }
 }
+
+function stopScannerStream(){
+  clearTimeout(scannerTimer);
+  scannerStarting = false;
+  if(scannerStream){
+    scannerStream.getVideoTracks().forEach(track => { track.onended = null; });
+    scannerStream.getTracks().forEach(track => track.stop());
+    scannerStream = null;
+  }
+  const video = $('scanner-video');
+  if(video){
+    video.onplaying = null;
+    video.pause();
+    // sem limpar o srcObject, o último quadro fica congelado na tela
+    video.srcObject = null;
+    video.removeAttribute('src');
+    video.load();
+  }
+}
+
+function stopScanner(userAsked = false){
+  const wasOn = !!scannerStream || scannerStarting;
+  stopScannerStream();
+  if(!$('scanner-frame')) return;
+  if(userAsked) setScannerUI('off', { caption: 'Câmera desligada. Ligue de novo quando quiser.' });
+  else if(wasOn || state.activeTab !== 'scanner') setScannerUI('off');
+}
+
+/* Ao voltar para o app, o vídeo costuma ficar parado no último quadro:
+   manda tocar de novo (ou avisa, se a câmera foi encerrada pelo sistema). */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden || !scannerStream) return;
+  const video = $('scanner-video');
+  const live = scannerStream.getVideoTracks().some(track => track.readyState === 'live');
+  if(!live){ showScannerError('A câmera foi interrompida enquanto o app estava em segundo plano.'); return; }
+  if(video && video.paused) video.play().catch(()=>{});
+});
 function buildScannerMockList(){
   $('scanner-mock-list').innerHTML = state.catalog.medicines.slice(0,8).map(m=>
     `<button class="chip" onclick="scanResult('${m.id}')">${escapeHtml(m.name)}</button>`
@@ -619,7 +814,7 @@ function buildScannerMockList(){
 }
 function mockCapture(){
   const meds = state.catalog.medicines;
-  if(meds.length===0) return;
+  if(meds.length===0){ showToast('O catálogo ainda está carregando. Tente em instantes.'); return; }
   scanResult(meds[Math.floor(Math.random()*meds.length)].id);
 }
 function scanResult(medId){
@@ -689,6 +884,148 @@ function fireReminderNotification(r){
   showToast(`${title}: ${body}`);
 }
 
+/* ---------------- tela de lembretes ----------------
+   Pensada para quem não tem intimidade com celular: três perguntas curtas,
+   botões grandes, horários e dias prontos para tocar, e um resumo em
+   português antes de confirmar. Quem toma o remédio todo dia cria todos os
+   lembretes de uma vez (7, 15 ou 30 dias). */
+
+const TIME_PRESETS = [
+  { label: 'Manhã',  hint: '08:00', time: '08:00' },
+  { label: 'Almoço', hint: '12:00', time: '12:00' },
+  { label: 'Tarde',  hint: '18:00', time: '18:00' },
+  { label: 'Noite',  hint: '22:00', time: '22:00' },
+];
+const REPEAT_OPTIONS = [
+  { label: 'Só este dia', days: 1 },
+  { label: '7 dias',      days: 7 },
+  { label: '15 dias',     days: 15 },
+  { label: '30 dias',     days: 30 },
+];
+
+const reminderForm = { time: '08:00', date: null, repeatDays: 1, calendarOpen: false, saving: false };
+
+const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
+const dayDiff = (from, to) => Math.round((addDays(to,0) - addDays(from,0)) / 86400000);
+const timeToMinutes = time => Number(time.slice(0,2)) * 60 + Number(time.slice(3,5));
+const minutesToTime = minutes => {
+  const total = ((minutes % 1440) + 1440) % 1440;
+  return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`;
+};
+const periodOfDay = time => {
+  const hour = Number(time.slice(0,2));
+  if(hour < 12) return 'da manhã';
+  if(hour < 18) return 'da tarde';
+  return 'da noite';
+};
+function dayName(date){
+  const diff = dayDiff(startOfToday(), date);
+  if(diff === 0) return 'hoje';
+  if(diff === 1) return 'amanhã';
+  return `${date.getDate()} de ${MONTHS[date.getMonth()].toLowerCase()}`;
+}
+
+/* ---- escolhas do formulário ---- */
+
+function setReminderMed(name){
+  $('rem-med').value = name;
+  renderReminderChips();
+  renderReminderSummary();
+}
+function onReminderMedInput(){
+  renderReminderChips();
+  renderReminderSummary();
+}
+function setReminderTime(time){
+  if(!/^\d{2}:\d{2}$/.test(time)) return;
+  reminderForm.time = time;
+  $('rem-time').value = time;
+  renderReminderTime();
+  renderReminderSummary();
+}
+function shiftReminderTime(minutes){
+  setReminderTime(minutesToTime(timeToMinutes(reminderForm.time) + minutes));
+}
+function setReminderDate(date){
+  reminderForm.date = date;
+  reminderForm.calendarOpen = false;
+  state.calMonth = date.getMonth();
+  state.calYear = date.getFullYear();
+  state.calSelectedDay = date.getDate();
+  renderReminders();
+}
+function toggleReminderCalendar(){
+  reminderForm.calendarOpen = !reminderForm.calendarOpen;
+  renderReminders();
+}
+function setReminderRepeat(days){
+  reminderForm.repeatDays = days;
+  renderReminderChips();
+  renderReminderSummary();
+}
+
+/* ---- desenho da tela ---- */
+
+function renderReminders(){
+  if(!reminderForm.date) reminderForm.date = startOfToday();
+  renderReminderTime();
+  renderReminderChips();
+  $('rem-calendar').classList.toggle('hidden', !reminderForm.calendarOpen);
+  if(reminderForm.calendarOpen) renderCalendar();
+  renderReminderSummary();
+  renderReminderList();
+}
+
+function renderReminderTime(){
+  $('rem-time-label').textContent = reminderForm.time;
+  $('rem-time-period').textContent = periodOfDay(reminderForm.time);
+  $('rem-time').value = reminderForm.time;
+}
+
+const chip = (label, active, attr, hint = '') =>
+  `<button class="rem-chip ${active ? 'active' : ''}" ${attr}>${escapeHtml(label)}${hint ? `<small>${escapeHtml(hint)}</small>` : ''}</button>`;
+
+function renderReminderChips(){
+  // Remédios que a pessoa já comprou aparecem prontos para tocar.
+  const bought = [...new Set(state.orders.flatMap(o => o.items.map(i => i.name)))].slice(0, 4);
+  const suggestions = bought.length ? bought : state.catalog.medicines.slice(0, 4).map(m => m.name);
+  const typed = $('rem-med').value.trim();
+  $('rem-med-chips').innerHTML = suggestions.length
+    ? `<span class="rem-chips-label">Ou toque em um remédio:</span>` +
+      suggestions.map(name => chip(name, typed === name, `data-med="${escapeHtml(name)}"`)).join('')
+    : '';
+
+  $('rem-time-chips').innerHTML = TIME_PRESETS
+    .map(preset => chip(preset.label, reminderForm.time === preset.time, `data-time="${preset.time}"`, preset.hint))
+    .join('');
+
+  const chosen = reminderForm.date || startOfToday();
+  const diff = dayDiff(startOfToday(), chosen);
+  $('rem-day-chips').innerHTML = [
+    chip('Hoje', diff === 0, 'data-day="0"'),
+    chip('Amanhã', diff === 1, 'data-day="1"'),
+    chip(diff > 1 ? dayName(chosen) : 'Outro dia', diff > 1, 'data-day="pick"'),
+  ].join('');
+
+  $('rem-repeat-chips').innerHTML = REPEAT_OPTIONS
+    .map(option => chip(option.label, reminderForm.repeatDays === option.days, `data-repeat="${option.days}"`))
+    .join('');
+}
+
+function renderReminderSummary(){
+  const med = $('rem-med').value.trim();
+  const start = reminderForm.date || startOfToday();
+  const days = reminderForm.repeatDays;
+  const name = med ? `<b>${escapeHtml(med)}</b>` : 'seu remédio';
+  const when = days === 1
+    ? `${dayName(start)}`
+    : `todos os dias, de ${dayName(start)} até ${dayName(addDays(start, days - 1))}`;
+  $('rem-summary').innerHTML =
+    `Vamos avisar você de tomar ${name} às <b>${reminderForm.time}</b> ${periodOfDay(reminderForm.time)}, ${when}.`;
+  $('rem-save').textContent = days === 1 ? 'Criar lembrete' : `Criar ${days} lembretes`;
+}
+
 function calShiftMonth(delta){
   state.calMonth += delta;
   if(state.calMonth<0){ state.calMonth=11; state.calYear--; }
@@ -700,59 +1037,149 @@ function renderCalendar(){
   $('cal-month-label').textContent = `${MONTHS[state.calMonth]} ${state.calYear}`;
   const firstDow = new Date(state.calYear, state.calMonth, 1).getDay();
   const daysInMonth = new Date(state.calYear, state.calMonth+1, 0).getDate();
-  if(state.calSelectedDay > daysInMonth) state.calSelectedDay = daysInMonth;
+  const chosen = reminderForm.date || startOfToday();
   let html = DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('');
   for(let i=0;i<firstDow;i++) html += `<div class="cal-day muted"></div>`;
   for(let d=1; d<=daysInMonth; d++){
     const hasRem = state.reminders.some(r=> r.day===d && r.month===state.calMonth && r.year===state.calYear);
-    const sel = state.calSelectedDay===d;
+    const sel = chosen.getDate()===d && chosen.getMonth()===state.calMonth && chosen.getFullYear()===state.calYear;
     html += `<button class="cal-day ${sel?'selected':''} ${hasRem?'has-rem':''}" onclick="calSelectDay(${d})">${d}</button>`;
   }
   $('cal-grid').innerHTML = html;
-  renderReminderList();
 }
-function calSelectDay(d){ state.calSelectedDay = d; renderCalendar(); }
+function calSelectDay(d){
+  setReminderDate(new Date(state.calYear, state.calMonth, d));
+}
+
+/* ---- criar e apagar ---- */
 
 async function addReminder(){
   const med = $('rem-med').value.trim();
-  const time = $('rem-time').value;
-  if(!med || !time){ showToast('Preencha o remédio e o horário.'); return; }
-  requestNotificationPermission();
-  try{
-    const reminder = await api.addReminder({
-      med, time, day: state.calSelectedDay, month: state.calMonth, year: state.calYear
-    });
-    state.reminders.push(reminder);
-    $('rem-med').value='';
-    renderCalendar();
-    checkDueReminders();
-    showToast('Lembrete definido! Você será avisado na hora certa, pela hora do seu dispositivo.');
-  }catch(e){
-    showToast(e.message);
+  if(!med){
+    showToast('Escreva o nome do remédio no passo 1.');
+    $('rem-med').focus();
+    return;
   }
+  if(reminderForm.saving) return;
+  requestNotificationPermission();
+
+  const button = $('rem-save');
+  const total = reminderForm.repeatDays;
+  const start = reminderForm.date || startOfToday();
+  reminderForm.saving = true;
+  button.disabled = true;
+
+  let created = 0;
+  for(let i = 0; i < total; i++){
+    const date = addDays(start, i);
+    button.textContent = total > 1 ? `Criando… ${i + 1} de ${total}` : 'Criando…';
+    try{
+      const reminder = await api.addReminder({
+        med, time: reminderForm.time,
+        day: date.getDate(), month: date.getMonth(), year: date.getFullYear(),
+      });
+      state.reminders.push(reminder);
+      created++;
+    }catch(e){
+      showToast(e.message);
+      break;
+    }
+  }
+
+  reminderForm.saving = false;
+  button.disabled = false;
+  if(created){
+    $('rem-med').value = '';
+    showToast(created === 1
+      ? `Pronto! Vamos avisar às ${reminderForm.time}.`
+      : `Pronto! ${created} lembretes criados às ${reminderForm.time}.`);
+  }
+  renderReminders();
+  checkDueReminders();
 }
+
 async function removeReminder(id){
   try{
     await api.removeReminder(id);
     state.reminders = state.reminders.filter(r=>r.id!==id);
-    renderCalendar();
+    renderReminders();
   }catch(e){
     showToast(e.message);
   }
 }
+
+// Apagar um lembrete repetido tira todos os dias de uma vez (com confirmação).
+function removeReminderGroup(ids){
+  const first = state.reminders.find(r => r.id === ids[0]);
+  if(!first) return;
+  if(ids.length === 1){ removeReminder(ids[0]); return; }
+  showModal(ICON_RX, 'Apagar estes lembretes?',
+    `Você vai apagar os <b>${ids.length} lembretes</b> de ${escapeHtml(first.med)} às ${first.time}.`,
+    [
+      { label: `Apagar os ${ids.length}`, primary: true, onClick: async () => {
+        for(const id of ids){
+          try{ await api.removeReminder(id); }catch{ /* segue apagando os outros */ }
+        }
+        state.reminders = state.reminders.filter(r => !ids.includes(r.id));
+        renderReminders();
+        showToast('Lembretes apagados.');
+      }},
+      { label: 'Cancelar' },
+    ]);
+}
+
+/* ---- lista ---- */
+
+// Junta dias seguidos do mesmo remédio no mesmo horário num item só.
+function groupedReminders(){
+  const sorted = [...state.reminders].sort((a, b) => {
+    const dateA = new Date(a.year, a.month, a.day);
+    const dateB = new Date(b.year, b.month, b.day);
+    return dateA - dateB || a.time.localeCompare(b.time);
+  });
+  const groups = [];
+  for(const reminder of sorted){
+    const date = new Date(reminder.year, reminder.month, reminder.day);
+    const last = groups[groups.length - 1];
+    const follows = last && last.med === reminder.med && last.time === reminder.time
+      && dayDiff(last.dates[last.dates.length - 1], date) === 1;
+    if(follows){
+      last.dates.push(date);
+      last.ids.push(reminder.id);
+      last.pending = last.pending || !reminder.fired;
+    } else {
+      groups.push({ med: reminder.med, time: reminder.time, dates: [date], ids: [reminder.id], pending: !reminder.fired });
+    }
+  }
+  // os que ainda vão acontecer primeiro
+  return groups.sort((a, b) => Number(b.pending) - Number(a.pending) || a.dates[0] - b.dates[0]);
+}
+
 function renderReminderList(){
-  const list = state.reminders
-    .filter(r=>r.month===state.calMonth && r.year===state.calYear)
-    .sort((a,b)=> a.day-b.day || a.time.localeCompare(b.time));
   const el = $('rem-list');
-  if(list.length===0){ el.innerHTML = `<div class="empty-state" style="padding:24px 10px;"><p>Nenhum lembrete este mês ainda.</p></div>`; return; }
-  el.innerHTML = list.map(r=>`
-    <div class="rem-item">
-      <div class="rem-time">${r.time}</div>
-      <div class="rem-info"><p>${escapeHtml(r.med)}</p><span>Dia ${r.day} de ${MONTHS[r.month]}</span></div>
-      <button class="rem-del" onclick="removeReminder(${r.id})" aria-label="Excluir lembrete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6h12z"/></svg></button>
-    </div>
-  `).join('');
+  const groups = groupedReminders();
+  if(!groups.length){
+    el.innerHTML = `<div class="empty-inline">Você ainda não tem lembretes. Crie o primeiro aí em cima — são três toques.</div>`;
+    return;
+  }
+  el.innerHTML = groups.map(group => {
+    const first = group.dates[0];
+    const last = group.dates[group.dates.length - 1];
+    const when = group.dates.length === 1
+      ? `${dayName(first).charAt(0).toUpperCase()}${dayName(first).slice(1)}`
+      : `De ${first.getDate()} a ${last.getDate()} de ${MONTHS[last.getMonth()].toLowerCase()} · ${group.dates.length} dias`;
+    return `
+    <div class="rem-item ${group.pending ? '' : 'done'}">
+      <div class="rem-time">${group.time}</div>
+      <div class="rem-info">
+        <p>${escapeHtml(group.med)}</p>
+        <span>${when}${group.pending ? '' : ' · já avisado'}</span>
+      </div>
+      <button class="rem-del" onclick="removeReminderGroup([${group.ids.join(',')}])" aria-label="Apagar lembrete">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6h12z"/></svg>
+      </button>
+    </div>`;
+  }).join('');
 }
 
 /* ---------------- pontos ----------------
@@ -907,9 +1334,34 @@ window.addEventListener('resize', ()=>{
   googleResizeTimer = setTimeout(()=>{ if(!state.user) renderGoogleButtons(); }, 250);
 });
 
+// Os botões de remédio/horário/dia/repetição são desenhados por JS: um único
+// ouvinte por grupo cuida dos toques.
+function bindReminderChips(){
+  $('rem-med-chips').addEventListener('click', event => {
+    const button = event.target.closest('[data-med]');
+    if(button) setReminderMed(button.dataset.med);
+  });
+  $('rem-time-chips').addEventListener('click', event => {
+    const button = event.target.closest('[data-time]');
+    if(button) setReminderTime(button.dataset.time);
+  });
+  $('rem-day-chips').addEventListener('click', event => {
+    const button = event.target.closest('[data-day]');
+    if(!button) return;
+    if(button.dataset.day === 'pick') toggleReminderCalendar();
+    else setReminderDate(addDays(startOfToday(), Number(button.dataset.day)));
+  });
+  $('rem-repeat-chips').addEventListener('click', event => {
+    const button = event.target.closest('[data-repeat]');
+    if(button) setReminderRepeat(Number(button.dataset.repeat));
+  });
+}
+
 function initApp(){
   applyLogo();
   buildNav();
+  setupPasswordToggles();
+  bindReminderChips();
   applyTheme(storage.get('trifarmas-theme') === 'dark' ? 'dark' : 'light');
   applyFontScale(Number(storage.get('trifarmas-font-scale')) || 1);
   showView('login');
