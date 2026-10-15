@@ -1,12 +1,27 @@
-<!-- Antes de publicar: troque SEU-USUARIO pelo seu usuário do GitHub nos endereços abaixo. -->
+<!-- A logo tem duas versões: a clara aparece no tema escuro do GitHub. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo-dark.png">
+  <img src="frontend/assets/logo.png" alt="Trifarmas" width="420">
+</picture>
 
-<img src="frontend/assets/logo-readme.png" alt="Trifarmas" width="420">
+![Status](https://img.shields.io/badge/status-em%20desenvolvimento-1e8a4c?style=for-the-badge)
+![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-1e8a4c?style=for-the-badge)
+![JavaScript](https://img.shields.io/badge/javascript-f7df1e?style=for-the-badge&logo=javascript&logoColor=000000)
+![Node.js](https://img.shields.io/badge/node.js-5fa04e?style=for-the-badge&logo=nodedotjs&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/postgresql-4169e1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Vercel](https://img.shields.io/badge/vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)
+![Render](https://img.shields.io/badge/render-5a4fcf?style=for-the-badge&logo=render&logoColor=white)
+
+<!-- Quer os badges com os números do repositório (tamanho, forks, issues)?
+     Depois de publicar no GitHub, troque SEU-USUARIO/trifarmas pelo caminho real
+     e tire estes cinco de dentro do comentário:
 
 ![GitHub repo size](https://img.shields.io/github/repo-size/SEU-USUARIO/trifarmas?style=for-the-badge&color=1e8a4c)
 ![GitHub language count](https://img.shields.io/github/languages/count/SEU-USUARIO/trifarmas?style=for-the-badge&color=1e8a4c)
 ![GitHub forks](https://img.shields.io/github/forks/SEU-USUARIO/trifarmas?style=for-the-badge&color=1e8a4c)
 ![GitHub issues](https://img.shields.io/github/issues/SEU-USUARIO/trifarmas?style=for-the-badge&color=1e8a4c)
 ![GitHub pull requests](https://img.shields.io/github/issues-pr/SEU-USUARIO/trifarmas?style=for-the-badge&color=1e8a4c)
+-->
 
 <img src="frontend/assets/preview.png" alt="Telas do Trifarmas: busca de remédios, lembretes e pedidos">
 
@@ -140,9 +155,9 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
   <tr>
     <td align="center">
       <a href="https://github.com/SEU-USUARIO" title="Perfil no GitHub">
-        <img src="frontend/assets/favicon.png" width="100px;" alt="Foto de Soraia Felipelli"/><br>
+        <img src="frontend/assets/favicon.png" width="100px;" alt="Logo do Time Trifarmas"/><br>
         <sub>
-          <b>Soraia Felipelli</b>
+          <b>Time Trifarmas</b>
         </sub>
       </a>
     </td>
