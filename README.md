@@ -146,23 +146,23 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
 <table>
   <tr>
     <td align="center">
-              <img src="frontend/assets/logo.png" alt="Trifarmas" width="150px">
+              <img src="frontend/assets/logo.png" alt="Trifarmas" width="100px">
       </a>
     </td>
      <td align="center">
       <a href="https://github.com/vhko20" title="Perfil no GitHub">
-              <img src="frontend/assets/oki.jfif" alt="vitor" width="150px">
+              <img src="frontend/assets/oki.jfif" alt="vitor" width="100px">
       </a>
     </td>
         </td>
      <td align="center">
       <a href="https://github.com/enzocavalcante-code" title="Perfil no GitHub">
-              <img src="frontend/assets/enzo.jfif" alt="enzo" width="150px">
+              <img src="frontend/assets/enzo.jfif" alt="enzo" width="100px">
       </a>
     </td>
        <td align="center">
       <a href="https://github.com/vnniwzx" title="Perfil no GitHub">
-              <img src="frontend/assets/vinicius.jfif" alt="vini" width="150px">
+              <img src="frontend/assets/vinicius.jfif" alt="vini" width="100px">
       </a>
     </td>
   </tr>
