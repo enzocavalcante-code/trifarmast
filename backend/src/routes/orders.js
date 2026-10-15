@@ -177,6 +177,10 @@ router.post('/:id/prescription', asyncHandler(async (req, res) => {
     if (!row) throw new HttpError(404, 'Pedido não encontrado.');
     if (!row.requires_prescription) throw new HttpError(400, 'Este pedido não precisa de receita.');
     if (row.prescription_choice) throw new HttpError(400, 'A receita deste pedido já foi informada.');
+    // Em pedidos com entrega a receita só vale anexada: não há conferência com o motoboy.
+    if (choice === 'in_person' && serialize.isDelivery(row)) {
+      throw new HttpError(400, 'Em pedidos com entrega, a receita precisa ser anexada no app.');
+    }
 
     if (file) {
       await client.query(

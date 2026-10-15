@@ -328,7 +328,9 @@ function rxNotice(lines){
   return `<div class="rx-notice">
     <div class="rx-notice-icon">${ICON_RX}</div>
     <div><b>Receita médica necessária</b>
-      <p>${rxNames.join(', ')} ${rxNames.length > 1 ? 'exigem' : 'exige'} receita. Depois do pagamento, na aba <b>Pedidos</b>, você escolhe entre anexar a receita (PDF ou foto) ou mostrá-la ${isDelivery() ? 'ao motoboy na entrega' : 'na retirada'}.</p>
+      <p>${rxNames.join(', ')} ${rxNames.length > 1 ? 'exigem' : 'exige'} receita. ${isDelivery()
+        ? 'Na entrega, a receita precisa ser <b>anexada no app</b> (PDF ou foto), na aba <b>Pedidos</b>, depois do pagamento — o motoboy não confere receita.'
+        : 'Depois do pagamento, na aba <b>Pedidos</b>, você escolhe entre anexar a receita (PDF ou foto) ou mostrá-la na retirada.'}</p>
     </div>
   </div>`;
 }
@@ -609,7 +611,9 @@ async function confirmCheckout(){
     showModal(ICON_CHECK, 'Pagamento confirmado!',
       `Pedido <b>#${order.id}</b> na ${escapeHtml(order.pharmacyName)}. Você pagou <b>${formatBRL(order.paidAmount)}</b> via ${escapeHtml(order.paymentMethod)}.` +
       (needsRx
-        ? `<span class="modal-rx">Este pedido tem remédio que exige receita. Na aba Pedidos, escolha entre <b>anexar a receita</b> ou <b>mostrar na ${order.fulfillment === 'delivery' ? 'entrega' : 'retirada'}</b> para o pedido seguir.</span>`
+        ? `<span class="modal-rx">Este pedido tem remédio que exige receita. ${order.fulfillment === 'delivery'
+            ? 'Na aba Pedidos, <b>anexe a receita</b> (PDF ou foto) para o motoboy poder sair com o pedido.'
+            : 'Na aba Pedidos, escolha entre <b>anexar a receita</b> ou <b>mostrar na retirada</b> para o pedido seguir.'}</span>`
         : (order.fulfillment === 'delivery'
             ? ` O motoboy <b>${escapeHtml(order.delivery.courier.name)}</b> sai da farmácia em instantes — acompanhe no mapa. Os <b>+${order.points} pts</b> entram no seu saldo quando você ${handover}.`
             : ` Os <b>+${order.points} pts</b> entram no seu saldo quando você ${handover}.`)),

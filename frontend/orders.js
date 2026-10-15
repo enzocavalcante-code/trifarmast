@@ -287,11 +287,15 @@ function renderPrescriptionBox(order){
 
   if(order.status === STATUS.WAITING_RX){
     const uploading = uploadingOrderId === order.id;
+    // Na entrega a receita precisa vir pelo app: o motoboy não confere receita.
+    const delivery = orderIsDelivery(order);
     return `
     <div class="rx-box pending">
       <div class="rx-box-head">${ICON_RX}<b>Receita médica necessária</b></div>
-      <p>${rxItems || 'Este pedido'} só pode ser vendido com receita. Escolha uma opção para o pedido seguir:</p>
-      <div class="rx-actions">
+      <p>${rxItems || 'Este pedido'} só pode ser vendido com receita. ${delivery
+        ? 'Anexe a receita aqui no app para a farmácia conferir antes de despachar o pedido:'
+        : 'Escolha uma opção para o pedido seguir:'}</p>
+      <div class="rx-actions ${delivery ? 'single' : ''}">
         <label class="rx-action ${uploading ? 'busy' : ''}">
           <input type="file" accept="${RX_ACCEPT}" class="hidden" ${uploading ? 'disabled' : ''} onchange="uploadPrescription(${order.id}, this)">
           ${uploading
@@ -299,21 +303,19 @@ function renderPrescriptionBox(order){
             : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
                <span><b>Anexar receita</b><small>PDF ou foto, até 8 MB</small></span>`}
         </label>
+        ${delivery ? '' : `
         <button class="rx-action" ${uploading ? 'disabled' : ''} onclick="choosePrescriptionInPerson(${order.id})">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/><circle cx="12" cy="14" r="2.5"/></svg>
-          <span>${orderIsDelivery(order)
-            ? '<b>Mostrar ao motoboy</b><small>Tenha a receita original em mãos na entrega</small>'
-            : '<b>Mostrar na retirada</b><small>Leve a receita original à farmácia</small>'}</span>
-        </button>
+          <span><b>Mostrar na retirada</b><small>Leve a receita original à farmácia</small></span>
+        </button>`}
       </div>
+      ${delivery ? '<p class="rx-foot">Prefere mostrar a receita impressa? Troque para <b>retirada na farmácia</b> em um novo pedido.</p>' : ''}
     </div>`;
   }
   if(order.prescriptionChoice === 'upload'){
     return `<div class="rx-box ok">${ICON_CHECK}<span>Receita anexada e aprovada${order.prescriptionFileName ? ` · <button class="link-btn" onclick="viewPrescription(${order.id})">Ver ${escapeHtml(order.prescriptionFileName)}</button>` : ''}</span></div>`;
   }
-  return `<div class="rx-box info">${ICON_RX}<span>${orderIsDelivery(order)
-    ? `Tenha a <b>receita original</b> de ${rxItems} em mãos para mostrar ao motoboy.`
-    : `Leve a <b>receita original</b> de ${rxItems} na retirada.`}</span></div>`;
+  return `<div class="rx-box info">${ICON_RX}<span>Leve a <b>receita original</b> de ${rxItems} na retirada.</span></div>`;
 }
 
 function renderOrders(){
