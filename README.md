@@ -1,7 +1,7 @@
 <!-- A logo tem duas versões: a clara aparece no tema escuro do GitHub. -->
 <picture >
   <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo-white.png">
-  <img align="center" src="frontend/assets/logo.png" alt="Trifarmas" width="300px">
+  <img  src="frontend/assets/logo.png" alt="Trifarmas" width="300px">
 </picture>
 
 ----------------------------------------------------------------------------
@@ -161,7 +161,7 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
       </a>
     </td>
        <td align="center">
-      <a href="https://github.com/" title="Perfil no GitHub">
+      <a href="https://github.com/vnniwzx" title="Perfil no GitHub">
               <img src="frontend/assets/vinicius.jfif" alt="vini" width="150px">
       </a>
     </td>
