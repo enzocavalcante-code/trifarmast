@@ -4,6 +4,8 @@
   <img src="frontend/assets/logo.png" alt="Trifarmas" width="300px">
 </picture>
 
+----------------------------------------------------------------------------
+
 ![Status](https://img.shields.io/badge/status-em%20desenvolvimento-1e8a4c?style=for-the-badge)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-1e8a4c?style=for-the-badge)
 ![JavaScript](https://img.shields.io/badge/javascript-f7df1e?style=for-the-badge&logo=javascript&logoColor=000000)
