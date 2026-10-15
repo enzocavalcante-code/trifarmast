@@ -111,62 +111,69 @@ function pharmacyDistance(pharm){
 
 /* ---------------- localização do aparelho ---------------- */
 
-function getPosition(options){
-  return new Promise((resolve, reject)=> navigator.geolocation.getCurrentPosition(resolve, reject, options));
+// Metas de precisão (em metros) e tempos de espera do GPS.
+const GPS = {
+  exactM: 30,            // "na porta de casa": para de procurar ao chegar nisso
+  goodM: 100,            // já serve para a entrega
+  firstTimeoutMs: 30000, // o GPS do celular pode levar ~20 s para a primeira leitura exata
+  networkTimeoutMs: 12000,
+  refineMs: 45000,       // continua melhorando em segundo plano depois da 1ª leitura
+};
+
+let gpsWatchId = null;
+function stopGpsWatch(){
+  if(gpsWatchId !== null){ navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
 }
 
-// Acompanha as leituras do GPS por alguns segundos e fica com a mais precisa.
-// (Muitos celulares entregam primeiro uma leitura grosseira e só depois a exata;
-// getCurrentPosition às vezes desiste antes disso.)
-function watchForPosition({ highAccuracy, timeoutMs, goodEnoughM, settleMs = 4000 }){
+// Acompanha o GPS e entrega CADA leitura melhor que a anterior (onReading), em vez de
+// esperar a melhor de todas: o mapa já mostra a posição e vai se ajustando sozinho.
+// Só termina quando chega na precisão pedida, quando o tempo acaba ou quando dá erro.
+function trackPosition({ highAccuracy, timeoutMs, stopAtM, onReading }){
   return new Promise((resolve, reject)=>{
-    let best = null, lastError = null, done = false, settleTimer = null, watchId = null;
+    let best = null, lastError = null, done = false, graceTimer = null;
     const finish = err => {
       if(done) return;
       done = true;
-      clearTimeout(timer); clearTimeout(settleTimer);
-      if(watchId !== null) navigator.geolocation.clearWatch(watchId);
+      clearTimeout(timer); clearTimeout(graceTimer);
+      stopGpsWatch();
       best ? resolve(best) : reject(err || lastError || { code: 3 });
     };
     const timer = setTimeout(()=> finish(), timeoutMs);
-    watchId = navigator.geolocation.watchPosition(pos=>{
-      if(!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
-      if(pos.coords.accuracy <= goodEnoughM) return finish();
-      if(!settleTimer) settleTimer = setTimeout(()=> finish(), settleMs);
+    stopGpsWatch();
+    gpsWatchId = navigator.geolocation.watchPosition(pos=>{
+      clearTimeout(graceTimer);
+      graceTimer = null;
+      if(best && pos.coords.accuracy >= best.coords.accuracy) return; // ignora leituras piores
+      best = pos;
+      onReading(pos);
+      if(pos.coords.accuracy <= stopAtM) finish();
     }, err=>{
       lastError = err;
-      if(err.code === 1) finish(err); // permissão negada: para na hora
+      if(best) return finish();       // já temos uma posição: fica com ela
+      if(err.code === 1) return finish(err); // permissão negada: não adianta insistir
+      // "Posição indisponível" pode ser o GPS esquentando: espera um pouco antes de desistir
+      // (sem isso, computador sem GPS ficaria 30 s travado antes de tentar pela rede).
+      if(!graceTimer) graceTimer = setTimeout(()=> finish(), 8000);
     }, { enableHighAccuracy: highAccuracy, maximumAge: 0, timeout: timeoutMs });
   });
 }
 
-// 1ª tentativa: GPS de alta precisão (até 12s, aceita na hora se a precisão for ≤ 50 m).
-// 2ª tentativa: localização por Wi-Fi/rede (a que funciona em computadores).
-async function getBestPosition(){
-  try{
-    return await watchForPosition({ highAccuracy: true, timeoutMs: 12000, goodEnoughM: 50 });
-  }catch(err){
-    if(err.code === 1) throw err;
-    setLocStatus('<span class="spinner"></span> GPS sem sinal, tentando pela rede Wi-Fi…');
-    return watchForPosition({ highAccuracy: false, timeoutMs: 10000, goodEnoughM: 500, settleMs: 1500 });
-  }
-}
-
-// Depois de uma leitura pouco precisa, continua ouvindo o GPS por 30s e
-// atualiza o mapa se aparecer uma leitura bem melhor.
+// Depois da primeira leitura, continua ouvindo o GPS por alguns segundos:
+// é assim que a precisão cai de "~800 m" para "~10 m" sem a pessoa fazer nada.
 let refineWatchId = null;
 function refineGpsInBackground(){
   stopRefining();
-  if(!loc.accuracy || loc.accuracy <= 80) return;
-  const stopAt = Date.now() + 30000;
+  if(!loc.accuracy || loc.accuracy <= GPS.exactM) return;
+  const stopAt = Date.now() + GPS.refineMs;
   refineWatchId = navigator.geolocation.watchPosition(pos=>{
     if(Date.now() > stopAt || loc.source !== 'gps') return stopRefining();
-    if(pos.coords.accuracy < loc.accuracy * 0.5){
+    // Vale qualquer leitura 15% melhor que a atual (antes exigia metade: quase nunca acontecia).
+    if(pos.coords.accuracy < loc.accuracy * 0.85){
       setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, source: 'gps' });
-      if(pos.coords.accuracy <= 80) stopRefining();
+      if(pos.coords.accuracy <= GPS.exactM) stopRefining();
     }
-  }, ()=> stopRefining(), { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
-  setTimeout(stopRefining, 31000);
+  }, ()=> stopRefining(), { enableHighAccuracy: true, maximumAge: 0, timeout: GPS.refineMs });
+  setTimeout(stopRefining, GPS.refineMs + 1000);
 }
 function stopRefining(){
   if(refineWatchId !== null){ navigator.geolocation.clearWatch(refineWatchId); refineWatchId = null; }
@@ -179,35 +186,68 @@ async function permissionState(){
   return 'prompt';
 }
 
-// Motivo curto de o GPS não ter funcionado (o texto de "o que fazer" é montado em quem exibe).
+// Motivo de o GPS não ter funcionado, no idioma de quem está usando o app.
 function geolocationErrorMessage(err){
-  if(!window.isSecureContext) return 'A localização do aparelho só funciona em sites com https.';
-  if(err && err.code === 1) return 'A localização está bloqueada no navegador (libere no cadeado ao lado do endereço do site).';
-  if(err && err.code === 3) return 'O GPS demorou demais para responder.';
-  if(/Windows/.test(navigator.userAgent)) return 'O computador não informou a localização (ative em Configurações do Windows > Privacidade e segurança > Localização).';
-  if(/Mac OS X/.test(navigator.userAgent) && !/Mobile/.test(navigator.userAgent)) return 'O computador não informou a localização (ative em Ajustes do Sistema > Privacidade e Segurança > Serviços de Localização).';
+  if(!window.isSecureContext){
+    return 'O navegador só libera a localização exata em endereços <b>https</b> (ou em <b>localhost</b>). ' +
+           'Abrindo o app pelo número de IP da máquina (http://192.168…), o Chrome bloqueia o GPS sem nem perguntar.';
+  }
+  if(err && err.code === 1) return 'A localização está bloqueada para este site. Toque no <b>cadeado</b> ao lado do endereço → Permissões → Localização → Permitir.';
+  if(err && err.code === 3) return 'O GPS demorou demais para responder. Em lugar fechado o sinal pode não chegar: tente perto de uma janela ou na rua.';
+  if(/Android/.test(navigator.userAgent)) return 'O aparelho não informou a localização. Puxe a barra de cima e veja se a <b>Localização</b> do Android está ligada.';
+  if(/iPhone|iPad/.test(navigator.userAgent)) return 'O aparelho não informou a localização. Veja em <b>Ajustes → Privacidade → Serviços de Localização</b> se o seu navegador tem permissão.';
+  if(/Windows/.test(navigator.userAgent)) return 'O computador não informou a localização. Ative em <b>Configurações do Windows → Privacidade e segurança → Localização</b> (computador sem GPS costuma errar bastante).';
+  if(/Mac OS X/.test(navigator.userAgent)) return 'O computador não informou a localização. Ative em <b>Ajustes do Sistema → Privacidade e Segurança → Serviços de Localização</b>.';
   return 'O aparelho não informou a localização. Verifique se a localização (GPS) está ligada.';
+}
+
+// Linha técnica embaixo do aviso: ajuda a entender por que falhou.
+function locationFailureDetails(err){
+  const codes = { 1: 'permissão negada', 2: 'posição indisponível', 3: 'tempo esgotado' };
+  const parts = [];
+  if(err && err.code) parts.push(`erro ${err.code} (${codes[err.code] || 'desconhecido'})`);
+  if(err && err.message) parts.push(escapeHtml(String(err.message).slice(0, 80)));
+  parts.push(window.isSecureContext ? 'conexão segura' : 'conexão sem https');
+  return parts.join(' · ');
+}
+
+// Aviso de GPS indisponível, com o que fazer e um botão para tentar de novo.
+function showGpsProblem(err){
+  setLocStatus(`<span>${loc.gpsError}</span>
+    <span class="loc-tip">Enquanto isso, digite seu <b>endereço ou CEP</b> no campo acima — a entrega usa esse endereço.</span>
+    <span class="loc-detail">${locationFailureDetails(err)}</span>
+    <button class="btn-outline-sm" onclick="requestMapLocation(true)">Tentar o GPS de novo</button>`, 'warn');
 }
 
 async function requestMapLocation(userInitiated = false){
   if(loc.locating) return;
   if(!('geolocation' in navigator)){
     loc.gpsError = 'Seu navegador não oferece localização.';
-    return useApproximateLocation();
+    return useApproximateLocation({ code: 2, message: 'navegador sem geolocalização' });
+  }
+  // Sem https o navegador nem pergunta: explica em vez de insistir.
+  if(!window.isSecureContext){
+    loc.gpsError = geolocationErrorMessage(null);
+    showGpsProblem({ code: 1, message: 'contexto não seguro' });
+    if(!loc.coords) await useApproximateLocation();
+    return;
   }
   // Automático (sem clique): se o navegador já informa bloqueio, nem tenta o GPS.
   // Com clique no botão, tenta sempre — alguns navegadores informam "bloqueado" sem estar.
   if(!userInitiated && await permissionState() === 'denied'){
     loc.gpsError = geolocationErrorMessage({ code: 1 });
-    return useApproximateLocation();
+    return useApproximateLocation({ code: 1, message: 'bloqueada nas permissões do site' });
   }
+
   loc.locating = true;
   setGpsButtonBusy(true);
-  setLocStatus('<span class="spinner"></span> Obtendo sua localização… se o navegador perguntar, toque em <b>Permitir</b>.');
-  try{
-    const pos = await getBestPosition();
-    loc.locating = false;
-    setGpsButtonBusy(false);
+  stopRefining();
+  setLocStatus('<span class="spinner"></span> Procurando sua localização… se o navegador perguntar, toque em <b>Permitir</b>.');
+
+  let got = false;
+  // Cada leitura melhor já entra no mapa, com a precisão à vista.
+  const apply = async pos => {
+    got = true;
     loc.gpsError = '';
     $('loc-input').value = '';
     loc.manualAddress = false;
@@ -217,29 +257,57 @@ async function requestMapLocation(userInitiated = false){
       accuracy: pos.coords.accuracy,
       source: 'gps',
     });
-    refineGpsInBackground();
-    if(userInitiated && state.activeTab !== 'map') showToast('Localização atualizada! Distâncias recalculadas.');
+    if(loc.locating && pos.coords.accuracy > GPS.exactM){
+      setLocStatus(`<span class="spinner"></span> Precisão de ~${formatAccuracy(pos.coords.accuracy)} — procurando um sinal melhor…`);
+    }
+  };
+
+  let lastError = null;
+  try{
+    await trackPosition({ highAccuracy: true, timeoutMs: GPS.firstTimeoutMs, stopAtM: GPS.exactM, onReading: apply });
   }catch(err){
-    loc.locating = false;
-    setGpsButtonBusy(false);
-    loc.gpsError = geolocationErrorMessage(err);
-    if(userInitiated && state.activeTab !== 'map') showToast('Não foi possível usar o GPS. Usando sua localização aproximada.');
-    if(!loc.coords || loc.source === 'ip') await useApproximateLocation();
-    else setLocStatus(`${loc.gpsError} Digite seu endereço ou CEP acima.`, 'warn');
+    lastError = err;
+    // Sem nenhuma leitura do GPS, tenta pela rede/Wi-Fi (é assim que funciona em computadores).
+    if(!got && !(err && err.code === 1)){
+      setLocStatus('<span class="spinner"></span> GPS sem sinal. Tentando pela rede Wi-Fi…');
+      try{
+        await trackPosition({ highAccuracy: false, timeoutMs: GPS.networkTimeoutMs, stopAtM: GPS.goodM, onReading: apply });
+        lastError = null;
+      }catch(err2){ lastError = err2; }
+    }
   }
+  loc.locating = false;
+  setGpsButtonBusy(false);
+
+  if(got){
+    updateLocationStatus();
+    refineGpsInBackground();   // continua afinando a precisão sozinho
+    if(userInitiated && state.activeTab !== 'map') showToast('Localização atualizada! Distâncias recalculadas.');
+    return;
+  }
+
+  loc.gpsError = geolocationErrorMessage(lastError);
+  if(userInitiated && state.activeTab !== 'map') showToast('Não foi possível usar o GPS. Veja a aba Farmácias.');
+  if(!loc.coords || loc.source === 'ip') await useApproximateLocation(lastError);
+  else showGpsProblem(lastError);
 }
 
 // Sem GPS: estima a localização pela conexão de internet (nível de bairro/cidade),
 // para o mapa já mostrar farmácias. A pessoa pode refinar digitando o CEP.
-async function useApproximateLocation(){
+async function useApproximateLocation(err = null){
   setLocStatus('<span class="spinner"></span> Buscando sua localização aproximada…');
   try{
     const place = await api.approximateLocation();
     await setLocation({ lat: place.lat, lng: place.lng, source: 'ip', address: place.label });
   }catch{
-    setLocStatus(`${loc.gpsError || ''} Digite seu endereço ou CEP acima para ver as farmácias.`.trim(), 'warn');
+    // Nem GPS nem estimativa pela internet: mostra o motivo e deixa o endereço como saída.
+    if(loc.gpsError) showGpsProblem(err);
+    else setLocStatus('Não consegui descobrir sua localização automaticamente. Digite seu <b>endereço ou CEP</b> acima.', 'warn');
     if(!loc.coords) showMapAt(DEFAULT_CENTER, 12);
+    return;
   }
+  // Deixa claro que é a aproximada e por que o GPS não entrou.
+  if(loc.gpsError) updateLocationStatus(err);
 }
 
 function setGpsButtonBusy(busy){
@@ -272,22 +340,44 @@ async function watchPermissionChanges(){
   }catch{ /* navegador sem Permissions API */ }
 }
 
+let lastNearbyCenter = null;   // ponto em que as farmácias ao redor foram buscadas
+let lastAddressPoint = null;   // ponto do último endereço lido pelo mapa
+
 async function setLocation({ lat, lng, accuracy = null, source, address = '' }, { save = true } = {}){
   const requestId = ++loc.requestId;
-  loc.coords = { lat, lng };
+  const point = { lat, lng };
+  loc.coords = point;
   loc.accuracy = accuracy;
   loc.source = source;
-  loc.address = address;
-  loc.pharmacies = [];
-  loc.chainMatches = {};
-  loc.pharmaciesStatus = 'loading';
+  if(address){
+    loc.address = address;
+    lastAddressPoint = point;
+  }
+
+  // O GPS manda várias leituras seguidas enquanto afina a precisão: só vale buscar
+  // as farmácias de novo quando a posição realmente mudou de lugar (mais de 250 m).
+  // (se a busca falhou, não insiste a cada leitura: fica o botão "Tentar de novo")
+  const moved = !lastNearbyCenter || haversineKm(lastNearbyCenter, point) > 0.25;
+  const reload = moved || loc.pharmaciesStatus === 'idle';
+
+  if(reload){
+    loc.pharmacies = [];
+    loc.chainMatches = {};
+    loc.pharmaciesStatus = 'loading';
+  } else {
+    rescoreNearbyPharmacies();   // mesma lista, distâncias recalculadas
+  }
 
   updateLocationStatus();
   updateLocationHint();
-  showMapAt(loc.coords, source === 'ip' ? 13 : 15);
+  showMapAt(point, source === 'ip' ? 13 : zoomForAccuracy(accuracy));
+  renderMapMarkers();
   refreshDistanceViews();
 
-  if(!address){
+  // Endereço legível: só busca de novo se andou mais de 40 m (ou se ainda não tem).
+  const needsAddress = !address && (!loc.address || !lastAddressPoint || haversineKm(lastAddressPoint, point) > 0.04);
+  if(needsAddress){
+    lastAddressPoint = point;
     api.reverseGeocode(lat, lng).then(({ label })=>{
       if(requestId !== loc.requestId || !label) return;
       loc.address = label;
@@ -297,7 +387,31 @@ async function setLocation({ lat, lng, accuracy = null, source, address = '' }, 
   }
   if(save) persistLocation();
 
-  await loadNearbyPharmacies(requestId);
+  if(reload){
+    lastNearbyCenter = point;
+    await loadNearbyPharmacies(requestId);
+  }
+}
+
+// Zoom conforme a precisão: leitura exata mostra a rua; leitura grosseira, o bairro.
+function zoomForAccuracy(accuracy){
+  if(!accuracy) return 16;
+  if(accuracy <= 30) return 18;
+  if(accuracy <= 100) return 17;
+  if(accuracy <= 500) return 15;
+  return 14;
+}
+
+// Recalcula as distâncias da lista já carregada quando a posição muda pouco.
+function rescoreNearbyPharmacies(){
+  if(!loc.coords || !loc.pharmacies.length) return;
+  loc.pharmacies = loc.pharmacies
+    .map(p => ({ ...p, km: haversineKm(loc.coords, p) }))
+    .sort((a, b) => a.km - b.km);
+  loc.chainMatches = {};
+  for(const p of loc.pharmacies){
+    if(p.chainId && !loc.chainMatches[p.chainId]) loc.chainMatches[p.chainId] = p;
+  }
 }
 
 function persistLocation(){
@@ -307,19 +421,35 @@ function persistLocation(){
   });
 }
 
-function updateLocationStatus(){
+const formatAccuracy = m => (m < 1000 ? `${Math.round(m)} m` : formatKm(m / 1000));
+
+function updateLocationStatus(err = null){
   if(!loc.coords) return;
   const where = loc.address ? escapeHtml(loc.address) : 'sua localização atual';
-  const precision = loc.source === 'gps' && loc.accuracy
-    ? ` <span class="loc-precision">precisão de ~${loc.accuracy < 1000 ? Math.round(loc.accuracy) + ' m' : formatKm(loc.accuracy / 1000)}</span>`
-    : '';
+
   if(loc.source === 'ip'){
-    setLocStatus(`<span>Localização aproximada pela sua internet: <b>${where}</b>.</span>
-      <span class="loc-tip">${loc.gpsError ? loc.gpsError + ' ' : ''}Para mais precisão, digite seu CEP acima.</span>`, 'info');
+    setLocStatus(`<span>Esta é a localização <b>aproximada</b> pela sua internet: <b>${where}</b>. Pode errar por vários quilômetros.</span>
+      ${loc.gpsError ? `<span class="loc-tip">${loc.gpsError}</span>` : ''}
+      <span class="loc-tip">Digite seu <b>endereço ou CEP</b> acima para acertar o ponto — é esse endereço que a entrega usa.</span>
+      ${loc.gpsError ? `<span class="loc-detail">${locationFailureDetails(err)}</span>` : ''}
+      <button class="btn-outline-sm" onclick="requestMapLocation(true)">Tentar o GPS de novo</button>`, 'warn');
     return;
   }
-  const prefix = loc.source === 'gps' ? 'Você está em' : 'Mostrando farmácias perto de';
-  setLocStatus(`${prefix}: <b>${where}</b>${precision}`, 'ok');
+  if(loc.source !== 'gps'){
+    setLocStatus(`Mostrando farmácias perto de: <b>${where}</b>`, 'ok');
+    return;
+  }
+
+  const exact = loc.accuracy && loc.accuracy <= GPS.exactM;
+  const precision = loc.accuracy
+    ? ` <span class="loc-precision ${exact ? 'exact' : ''}">precisão de ~${formatAccuracy(loc.accuracy)}</span>`
+    : '';
+  // Precisão ruim: oferece melhorar sem ter que procurar o botão lá em cima.
+  const improve = loc.accuracy && loc.accuracy > GPS.goodM
+    ? `<span class="loc-tip">O sinal ainda está fraco. Perto de uma janela ou na rua a precisão melhora.</span>
+       <button class="btn-outline-sm" onclick="requestMapLocation(true)">Melhorar precisão</button>`
+    : '';
+  setLocStatus(`<span>Você está em: <b>${where}</b>${precision}</span>${improve}`, 'ok');
 }
 
 function updateLocationHint(){

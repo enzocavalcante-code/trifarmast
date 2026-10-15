@@ -94,17 +94,31 @@ function onAddressInput(field, value){
   if(warn && fullDeliveryAddress().trim().length >= 8) warn.classList.add('hidden');
 }
 
-// Preenche o endereço com o que a aba Mapa já descobriu.
-function useMyLocationAddress(){
-  if(typeof loc === 'undefined' || !loc.address){
-    showToast('Ative sua localização na aba Farmácias para preencher o endereço.');
-    if(typeof requestMapLocation === 'function' && typeof loc !== 'undefined' && !loc.coords) requestMapLocation(true);
+// Preenche o endereço pelo GPS. Se a localização ainda não foi lida, lê na hora.
+async function useMyLocationAddress(){
+  if(typeof loc === 'undefined') return;
+  if(!loc.coords || loc.source === 'ip'){
+    showToast('Procurando sua localização… toque em Permitir se o navegador perguntar.');
+    if(typeof requestMapLocation === 'function') await requestMapLocation(true);
+  }
+  if(!loc.coords){
+    showToast('Não consegui pegar sua localização. Veja o aviso na aba Farmácias ou digite o endereço aqui.');
     return;
   }
-  checkout.address = loc.address;
+  let address = loc.address;
+  if(!address){
+    try{ address = (await api.reverseGeocode(loc.coords.lat, loc.coords.lng)).label; }catch{ /* segue sem endereço */ }
+  }
+  if(!address){
+    showToast('Não consegui transformar sua localização em endereço. Digite a rua e o número.');
+    return;
+  }
+  checkout.address = address;
   storage.set(addressKey(), { address: checkout.address, complement: checkout.complement });
   renderCheckout();
-  showToast('Endereço preenchido com sua localização atual.');
+  showToast(loc.source === 'gps' && loc.accuracy && loc.accuracy <= 30
+    ? 'Endereço preenchido pelo GPS.'
+    : 'Endereço preenchido — confira o número da casa.');
 }
 
 /* ---------------- dados do carrinho ---------------- */
@@ -365,6 +379,20 @@ function renderFulfillmentStep(pharm){
   </section>`;
 }
 
+// Linha que mostra de onde veio o endereço: GPS exato, GPS fraco ou sem localização.
+function addressSourceHint(){
+  if(typeof loc === 'undefined' || !loc.coords) return '';
+  const pin = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
+  if(loc.source !== 'gps'){
+    return `<div class="deliv-gps weak">${pin} Localização só aproximada (pela internet) — confira a rua e o número.</div>`;
+  }
+  const exact = loc.accuracy && loc.accuracy <= 30;
+  const precision = loc.accuracy ? formatAccuracy(loc.accuracy) : '?';
+  return `<div class="deliv-gps ${exact ? '' : 'weak'}">${pin} ${exact
+    ? `Endereço pelo GPS, precisão de ~${precision}`
+    : `GPS com precisão de ~${precision} — confira a rua e o número`}</div>`;
+}
+
 function renderAddressBox(){
   const locationKnown = typeof loc !== 'undefined' && !!loc.address;
   return `
@@ -380,6 +408,7 @@ function renderAddressBox(){
              value="${escapeHtml(checkout.complement)}" oninput="onAddressInput('complement', this.value)">
     </div>
     <div id="co-address-warn" class="deliv-warn hidden">Escreva a rua, o número e o bairro para o motoboy achar sua casa.</div>
+    ${addressSourceHint()}
     <button type="button" class="btn-outline-sm" onclick="useMyLocationAddress()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>
       ${locationKnown ? 'Usar minha localização' : 'Ativar localização'}
