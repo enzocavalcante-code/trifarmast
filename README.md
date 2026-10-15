@@ -1,7 +1,7 @@
 <!-- A logo tem duas versões: a clara aparece no tema escuro do GitHub. -->
 <picture >
   <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo.png">
-  <img  src="frontend/assets/logo.png" alt="Trifarmas" width="500px">
+  <img  src="frontend/assets/logo.png" alt="Trifarmas" width="400px">
 </picture>
 
 ----------------------------------------------------------------------------
