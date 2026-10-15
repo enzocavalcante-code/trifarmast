@@ -1,7 +1,7 @@
 <!-- A logo tem duas versões: a clara aparece no tema escuro do GitHub. -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo-dark.png">
-  <img src="frontend/assets/logo.png" alt="Trifarmas" width="420">
+  <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo-white.png">
+  <img src="frontend/assets/logo.png" alt="Trifarmas" width="300px">
 </picture>
 
 ![Status](https://img.shields.io/badge/status-em%20desenvolvimento-1e8a4c?style=for-the-badge)
