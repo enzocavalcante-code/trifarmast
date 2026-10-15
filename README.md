@@ -145,10 +145,9 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
   <tr>
     <td align="center">
       <a href="https://github.com/enzocavalcante-code" title="Perfil no GitHub">
-              <img src="frontend/assets/logo.png" alt="Trifarmas" width="150px">
+              <img src="frontend/assets/logo.png" alt="Trifarmas" width="300px">
       </a>
     </td>
-
   </tr>
 </table>
 
