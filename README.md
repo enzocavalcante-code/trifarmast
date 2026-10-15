@@ -1,7 +1,7 @@
 <!-- A logo tem duas versões: a clara aparece no tema escuro do GitHub. -->
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo-white.png">
-  <img src="frontend/assets/logo.png" alt="Trifarmas" width="300px" justify-content:center>
+  <img src="frontend/assets/logo.png" alt="Trifarmas" width="300px">
 </picture>
 
 ----------------------------------------------------------------------------
@@ -148,6 +148,11 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
     <td align="center">
       <a href="https://github.com/enzocavalcante-code" title="Perfil no GitHub">
               <img src="frontend/assets/logo.png" alt="Trifarmas" width="240px">
+      </a>
+    </td>
+     <td align="center">
+      <a href="https://github.com/vhko20" title="Perfil no GitHub">
+              <img src="frontend/assets/oki.jfif" alt="vitor" width="240px">
       </a>
     </td>
   </tr>
