@@ -43,10 +43,10 @@ O projeto ainda está em desenvolvimento e as próximas atualizações serão vo
 - [x] Ver a senha enquanto digita
 - [x] Modo escuro e tamanho do texto ajustável
 - [ ] Ler a receita pela câmera e achar o remédio mais barato
-- [ ] Preços de verdade (tabela da CMED e dados das farmácias)
-- [ ] Pagamento de verdade com Pix
-- [ ] Retirada confirmada pela própria farmácia, no balcão
-- [ ] Aplicativo para Android e iPhone
+- [ ] Preços de verdade (tabela da CMED e dados das farmácias, quando o projeto real for feito)
+- [ ] Pagamento de verdade com Pix(quando o projeto real for feito)
+- [ ] Retirada confirmada pela própria farmácia, no balcão(quando o projeto real for feito)
+- [ ] Aplicativo para Android e IOS(quando o projeto real for feito)
 
 ## 💻 Pré-requisitos
 
@@ -135,17 +135,7 @@ Render, crie o projeto com *Root Directory* `frontend` e *Framework Preset* **Ot
 Por fim, adicione a URL do Vercel nas *Origens JavaScript autorizadas* do seu
 Client ID do Google.
 
-## 📫 Contribuindo para o Trifarmas
 
-Para contribuir com o Trifarmas, siga estas etapas:
-
-1. Bifurque este repositório.
-2. Crie um branch: `git checkout -b <nome_branch>`.
-3. Faça suas alterações e confirme-as: `git commit -m '<mensagem_commit>'`
-4. Envie para o branch original: `git push origin trifarmas / <local>`
-5. Crie a solicitação de pull.
-
-Como alternativa, consulte a documentação do GitHub em [como criar uma solicitação pull](https://help.github.com/en/github/collaborating-with-issues-and-pull-requests/creating-a-pull-request).
 
 ## 🤝 Colaboradores
 
@@ -157,14 +147,13 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
       <a href="https://github.com/SEU-USUARIO" title="Perfil no GitHub">
         <img src="frontend/assets/favicon.png" width="100px;" alt="Logo do Time Trifarmas"/><br>
         <sub>
-          <b>Time Trifarmas</b>
+         <img src="frontend/assets/favicon.png" width="20px;" alt="Logo do Time Trifarmas"/><br>
         </sub>
       </a>
     </td>
-    <!-- Para adicionar alguém, copie o bloco <td> acima e troque o link, a imagem e o nome. -->
+
   </tr>
 </table>
-
 
 ---
 
