@@ -6,8 +6,8 @@
 
 ----------------------------------------------------------------------------
 
-![Status](https://img.shields.io/badge/status-em%20desenvolvimento-1e8a4c?style=for-the-badge)
-![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-1e8a4c?style=for-the-badge)
+![Status:](https://img.shields.io/badge/status-em%20desenvolvimento-1e8a4c?style=for-the-badge)
+![Licença:](https://img.shields.io/badge/licen%C3%A7a-MIT-1e8a4c?style=for-the-badge)
 ![JavaScript](https://img.shields.io/badge/javascript-f7df1e?style=for-the-badge&logo=javascript&logoColor=000000)
 ![Node.js](https://img.shields.io/badge/node.js-5fa04e?style=for-the-badge&logo=nodedotjs&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/postgresql-4169e1?style=for-the-badge&logo=postgresql&logoColor=white)
