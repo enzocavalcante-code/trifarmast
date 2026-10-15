@@ -1,5 +1,5 @@
 <!-- A logo tem duas versões: a clara aparece no tema escuro do GitHub. -->
-<picture>
+<picture aling="center">
   <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo-white.png">
   <img src="frontend/assets/logo.png" alt="Trifarmas" width="300px">
 </picture>
@@ -158,6 +158,11 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
      <td align="center">
       <a href="https://github.com/enzocavalcante-code" title="Perfil no GitHub">
               <img src="frontend/assets/enzo.jfif" alt="enzo" width="150px">
+      </a>
+    </td>
+       <td align="center">
+      <a href="https://github.com/" title="Perfil no GitHub">
+              <img src="frontend/assets/vinicius.jfif" alt="vini" width="150px">
       </a>
     </td>
   </tr>
