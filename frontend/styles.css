@@ -117,7 +117,6 @@ input[type=search]::-webkit-search-cancel-button{cursor:pointer;}
 .app-logo-img.wordmark{width:100%; max-width:260px; height:auto;}
 .app-logo-img.topbar-logo{height:34px; width:auto; max-width:180px;}
 
-.auth-sub{color:var(--ink-soft); font-size:calc(13.5px * var(--fs)); text-align:center; margin-top:-4px;}
 .field{margin-bottom:15px; min-width:0;}
 .field label{display:block; font-size:calc(12.5px * var(--fs)); font-weight:600; color:var(--ink-soft); margin-bottom:6px;}
 .field input, .field textarea{
