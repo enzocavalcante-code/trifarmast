@@ -155,6 +155,21 @@ CREATE TABLE IF NOT EXISTS reminders (
 );
 CREATE INDEX IF NOT EXISTS reminders_user_idx ON reminders(user_id);
 
+-- ---------- Estoque em casa ----------
+-- Quantas unidades a pessoa tem de cada remédio, para avisar antes de acabar.
+CREATE TABLE IF NOT EXISTS med_stocks (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  medicine    TEXT NOT NULL,                        -- nome como a pessoa escreveu
+  med_key     TEXT NOT NULL,                        -- nome normalizado (sem acento, minúsculo)
+  units       NUMERIC(7,1) NOT NULL DEFAULT 0,      -- quantas unidades ainda tem
+  unit_label  TEXT NOT NULL DEFAULT 'comprimidos',
+  per_dose    NUMERIC(4,1) NOT NULL DEFAULT 1,      -- quantas unidades por horário
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, med_key)
+);
+CREATE INDEX IF NOT EXISTS med_stocks_user_idx ON med_stocks(user_id);
+
 -- Fotos enviadas manualmente antes da coluna avatar_custom existir continuam valendo.
 UPDATE users SET avatar_custom = TRUE
  WHERE avatar LIKE 'data:%' AND avatar_custom = FALSE AND google_picture IS NULL;

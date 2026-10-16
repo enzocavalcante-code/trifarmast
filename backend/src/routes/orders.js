@@ -5,6 +5,7 @@ const { parseDataUrl } = require('../images');
 const { pointsForPayment, addPoints } = require('../points');
 const { quoteDelivery, randomCourier, MAX_DELIVERY_KM } = require('../delivery');
 const serialize = require('../serializers');
+const { loadOrders } = require('../account');
 
 const router = express.Router();
 
@@ -15,27 +16,6 @@ const MAX_ITEMS = 30;
 const MAX_QUANTITY = 10;
 const PRESCRIPTION_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 const MAX_PRESCRIPTION_BYTES = 8 * 1024 * 1024;
-
-// Carrega pedidos com itens e o nome do arquivo de receita (sem o conteúdo do arquivo).
-async function loadOrders(db, userId, orderId = null) {
-  const { rows: orders } = await db.query(
-    `SELECT * FROM orders WHERE user_id = $1 AND ($2::bigint IS NULL OR id = $2) ORDER BY created_at DESC`,
-    [userId, orderId]
-  );
-  if (!orders.length) return [];
-  const ids = orders.map(o => o.id);
-  // Em sequência: dentro de uma transação a mesma conexão não deve rodar consultas em paralelo.
-  const items = await db.query('SELECT * FROM order_items WHERE order_id = ANY($1::bigint[]) ORDER BY id', [ids]);
-  const files = await db.query('SELECT order_id, file_name FROM prescriptions WHERE order_id = ANY($1::bigint[])', [ids]);
-  const itemsByOrder = new Map();
-  for (const item of items.rows) {
-    const key = String(item.order_id);
-    if (!itemsByOrder.has(key)) itemsByOrder.set(key, []);
-    itemsByOrder.get(key).push(item);
-  }
-  const fileByOrder = new Map(files.rows.map(f => [String(f.order_id), f.file_name]));
-  return orders.map(o => serialize.order(o, itemsByOrder.get(String(o.id)) || [], fileByOrder.get(String(o.id)) || null));
-}
 
 async function loadOrder(db, userId, orderId) {
   const [order] = await loadOrders(db, userId, orderId);

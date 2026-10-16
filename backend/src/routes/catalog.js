@@ -37,6 +37,8 @@ async function listMedicines(whereSql, params, orderSql) {
 
 // Catálogo público: farmácias, remédios e recompensas.
 router.get('/catalog', asyncHandler(async (req, res) => {
+  // O catálogo muda raramente: o navegador pode reaproveitar por 5 minutos.
+  res.set('Cache-Control', 'public, max-age=300');
   const [pharmacies, medicines, rewards] = await Promise.all([
     query('SELECT id, name, dist_km, domain FROM pharmacies ORDER BY dist_km'),
     listMedicines('m.owner_id IS NULL', [], 'm.popularity DESC, m.name'),

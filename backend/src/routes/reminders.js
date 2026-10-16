@@ -2,6 +2,7 @@ const express = require('express');
 const { query } = require('../db');
 const { HttpError, asyncHandler } = require('../errors');
 const serialize = require('../serializers');
+const { consumeDoses } = require('../stocks');
 
 const router = express.Router();
 
@@ -22,11 +23,20 @@ router.post('/', asyncHandler(async (req, res) => {
   res.status(201).json(serialize.reminder(rows[0]));
 }));
 
-// Marca lembretes como já disparados (a notificação é exibida pelo navegador).
+// Marca lembretes como já disparados (a notificação é exibida pelo navegador)
+// e dá baixa no estoque em casa: cada lembrete que toca é uma dose a menos.
 router.post('/fired', asyncHandler(async (req, res) => {
   const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Number.isFinite);
-  if (ids.length) await query('UPDATE reminders SET fired = TRUE WHERE user_id = $1 AND id = ANY($2::bigint[])', [req.userId, ids]);
-  res.status(204).end();
+  if (!ids.length) return res.json({ stocks: [] });
+  const { rows } = await query(
+    `UPDATE reminders SET fired = TRUE
+      WHERE user_id = $1 AND id = ANY($2::bigint[]) AND fired = FALSE
+      RETURNING medicine`,
+    [req.userId, ids]
+  );
+  const consume = req.body.consume !== false;   // lembrete muito atrasado não desconta
+  const stocks = (consume && rows.length) ? await consumeDoses(req.userId, rows.map(r => r.medicine)) : [];
+  res.json({ stocks });
 }));
 
 router.delete('/:id', asyncHandler(async (req, res) => {

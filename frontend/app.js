@@ -34,6 +34,7 @@ const state = {
   resultsLimit: RESULTS_PAGE_SIZE,
   expandedMeds: new Set(),
   reminders:[],
+  stocks:[],          // quantas unidades a pessoa tem em casa, por remédio
   orders:[],
   calMonth: new Date().getMonth(),
   calYear: new Date().getFullYear(),
@@ -144,15 +145,34 @@ function showView(name){
   renderGoogleButtons();
 }
 
-/* ---------------- catálogo (vem do banco) ---------------- */
+/* ---------------- catálogo (vem do banco) ----------------
+   O catálogo muda raramente. Guardamos uma cópia no aparelho para a busca
+   funcionar na hora, e buscamos a versão nova em segundo plano. */
 
-async function loadCatalog(){
+const CATALOG_KEY = 'trifarmas-catalog';
+const CATALOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function useCatalog(catalog){
+  state.catalog = catalog;
+  buildChips();
+  if(state.user) renderResults();
+}
+
+function loadCachedCatalog(){
+  const saved = storage.get(CATALOG_KEY);
+  if(!saved || !saved.catalog || !Array.isArray(saved.catalog.medicines) || !saved.catalog.medicines.length) return false;
+  if(Date.now() - saved.savedAt > CATALOG_MAX_AGE_MS) return false;
+  useCatalog(saved.catalog);
+  return true;
+}
+
+async function loadCatalog({ silent = false } = {}){
   try{
-    state.catalog = await api.catalog();
-    buildChips();
-    if(state.user) renderResults();
+    const catalog = await api.catalog();
+    useCatalog(catalog);
+    storage.set(CATALOG_KEY, { catalog, savedAt: Date.now() });
   }catch(e){
-    showToast(e.message);
+    if(!silent) showToast(e.message);
   }
 }
 
@@ -374,6 +394,28 @@ async function googleAuthDemo(mode){
 
 /* ---------------- login / cadastro ---------------- */
 
+/* Botão ocupado enquanto a conta carrega. Se demorar, explica que o servidor
+   gratuito está acordando — assim a espera não parece travamento. */
+async function withAuthButton(selector, busyLabel, task){
+  const button = document.querySelector(selector);
+  const original = button ? button.textContent : '';
+  let slowTimer = null;
+  if(button){
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner"></span> ${busyLabel}`;
+    slowTimer = setTimeout(() => {
+      button.innerHTML = '<span class="spinner"></span> Acordando o servidor…';
+      showToast('Primeiro acesso do dia: o servidor gratuito leva alguns segundos para ligar.');
+    }, 3500);
+  }
+  try{
+    return await task();
+  }finally{
+    clearTimeout(slowTimer);
+    if(button){ button.disabled = false; button.textContent = original; }
+  }
+}
+
 async function doLogin(){
   const email = $('login-email').value.trim();
   const pass = $('login-pass').value;
@@ -384,7 +426,9 @@ async function doLogin(){
     return;
   }
   try{
-    await enterApp(await api.login(email, pass));
+    await withAuthButton('#view-login .btn-primary', 'Entrando…', async () => {
+      await enterApp(await api.login(email, pass));
+    });
   }catch(e){
     err.textContent = e.message;
     err.classList.remove('hidden');
@@ -397,9 +441,11 @@ async function doSignup(){
   const password = $('signup-pass').value;
   if(!name || !email || !password){ showToast('Preencha todos os campos.'); return; }
   try{
-    const session = await api.signup({ name, email, password });
-    showToast('Conta criada! Bem-vindo(a) ao Trifarmas.');
-    await enterApp(session);
+    await withAuthButton('#view-signup .btn-primary', 'Criando sua conta…', async () => {
+      const session = await api.signup({ name, email, password });
+      showToast('Conta criada! Bem-vindo(a) ao Trifarmas.');
+      await enterApp(session);
+    });
   }catch(e){
     showToast(e.message);
   }
@@ -415,7 +461,10 @@ function doLogout(){
   state.user = null;
   state.orders = [];
   state.reminders = [];
+  state.stocks = [];
   state.pointsInfo = { pending: 0, coupons: [], history: [] };
+  updateOrdersBadge();
+  updateRemindersBadge();
   $('app').classList.add('hidden');
   showView('login');
   $('login-pass').value='';
@@ -428,17 +477,9 @@ async function enterApp(session){
   state.resultsLimit = RESULTS_PAGE_SIZE;
   loadCart();
 
-  // Carrega do banco os dados desta conta.
-  try{
-    const [orders, reminders, pointsInfo] = await Promise.all([
-      api.orders(), api.reminders(), api.points(),
-    ]);
-    setOrders(orders);
-    state.reminders = reminders;
-    applyPointsInfo(pointsInfo);
-  }catch(e){
-    showToast(e.message);
-  }
+  // Os dados da conta já vêm junto com o login (uma requisição só). Contas que
+  // entrarem por uma versão antiga da API seguem buscando em segundo plano.
+  const hasData = applyAccountData(session.data);
 
   $('view-login').classList.add('hidden');
   $('view-signup').classList.add('hidden');
@@ -457,6 +498,40 @@ async function enterApp(session){
 
   // Pop-up de boas-vindas: o servidor só libera na primeira entrada da conta.
   if(session.showWelcome) openWelcomePopup();
+
+  // Nada bloqueia a tela: se os dados não vieram no login, chegam agora.
+  if(!hasData) refreshAccountData();
+}
+
+// Pedidos, lembretes e pontos que vieram junto com o login.
+function applyAccountData(data){
+  if(!data) return false;
+  setOrders(data.orders || []);
+  state.reminders = data.reminders || [];
+  state.stocks = data.stocks || [];
+  if(data.points) applyPointsInfo(data.points);
+  return true;
+}
+
+// Busca os mesmos dados pelas rotas separadas (plano B).
+async function refreshAccountData(){
+  try{
+    const [orders, reminders, pointsInfo, stocks] = await Promise.all([
+      api.orders(), api.reminders(), api.points(), api.stocks(),
+    ]);
+    setOrders(orders);
+    state.reminders = reminders;
+    state.stocks = stocks;
+    applyPointsInfo(pointsInfo);
+    updatePointsUI();
+    updateOrdersBadge();
+    updateRemindersBadge();
+    if(state.activeTab === 'orders') renderOrders();
+    if(state.activeTab === 'calendar') renderReminders();
+    if(state.activeTab === 'points') renderPoints();
+  }catch(e){
+    showToast(e.message);
+  }
 }
 
 function refreshProfileUI(){
@@ -923,21 +998,41 @@ function startReminderEngine(){
   reminderCheckInterval = setInterval(() => { checkDueReminders(); checkRefillWarnings(); }, 20000);
 }
 
+// Horário que passou faz mais de 2h (ex.: marcar "08:00" às 22h) não avisa nem
+// desconta do estoque — só fica marcado como vencido.
+const STALE_REMINDER_MS = 2 * 60 * 60 * 1000;
+
 function checkDueReminders(){
   if(!state.user) return;
   const now = Date.now();
   const firedIds = [];
+  const staleIds = [];
   state.reminders.forEach(r=>{
     if(r.fired) return;
     const [hh, mm] = (r.time||'00:00').split(':').map(Number);
-    if(new Date(r.year, r.month, r.day, hh, mm, 0, 0).getTime() <= now){
-      r.fired = true;
-      firedIds.push(r.id);
-      fireReminderNotification(r);
+    const at = new Date(r.year, r.month, r.day, hh, mm, 0, 0).getTime();
+    if(at > now) return;
+    r.fired = true;
+    if(now - at > STALE_REMINDER_MS){
+      staleIds.push(r.id);
+      return;
     }
+    firedIds.push(r.id);
+    fireReminderNotification(r);
   });
+  if(staleIds.length) api.markRemindersFired(staleIds, false).catch(()=>{});
   if(firedIds.length){
-    api.markRemindersFired(firedIds).catch(()=>{});
+    // O servidor marca como avisado e desconta as doses do estoque em casa.
+    api.markRemindersFired(firedIds).then(result => {
+      if(!result || !result.stocks || !result.stocks.length) return;
+      result.stocks.forEach(stock => {
+        const idx = state.stocks.findIndex(s => s.key === stock.key);
+        if(idx >= 0) state.stocks[idx] = stock; else state.stocks.push(stock);
+      });
+      if(state.activeTab === 'calendar') renderReminders();
+      updateRemindersBadge();
+      checkRefillWarnings();
+    }).catch(()=>{});
     if(state.activeTab==='calendar') renderCalendar();
   }
 }
@@ -965,19 +1060,124 @@ function notify(title, body){
 const REFILL_WARNING_DAYS = 5;   // começa a avisar faltando 5 dias
 const REFILL_MIN_DAYS = 3;       // só vale para tratamento (não para um lembrete solto)
 
+/* ---- estoque em casa ---- */
+
+// Mesma regra do servidor para comparar nomes de remédio.
+const medKeyOf = name => normalizeText(name).trim().replace(/\s+/g, ' ');
+const stockFor = med => state.stocks.find(s => s.key === medKeyOf(med)) || null;
+
+// Quantas doses por dia este remédio tem marcadas (1 se não houver lembrete futuro).
+function dosesPerDay(med){
+  const key = medKeyOf(med);
+  const today = startOfToday();
+  const byDay = new Map();
+  for(const r of state.reminders){
+    if(medKeyOf(r.med) !== key) continue;
+    const date = new Date(r.year, r.month, r.day);
+    if(dayDiff(today, date) < 0) continue;
+    const dayKey = `${r.year}-${r.month}-${r.day}`;
+    byDay.set(dayKey, (byDay.get(dayKey) || 0) + 1);
+  }
+  if(!byDay.size) return 1;
+  const total = [...byDay.values()].reduce((sum, n) => sum + n, 0);
+  return Math.max(1, Math.round(total / byDay.size));
+}
+
+// Para quantos dias dá o que tem em casa.
+function stockDaysLeft(med){
+  const stock = stockFor(med);
+  if(!stock) return null;
+  const perDay = dosesPerDay(med) * (stock.perDose || 1);
+  if(perDay <= 0) return null;
+  return Math.floor(stock.units / perDay);
+}
+
+const unitsPhrase = stock =>
+  `${Number(stock.units) % 1 === 0 ? stock.units : Number(stock.units).toFixed(1).replace('.', ',')} ${stock.unitLabel}`;
+
+// Guarda (ou corrige) a quantidade que a pessoa tem em casa.
+async function saveStock(med, units, perDose, unitLabel){
+  try{
+    const { stock } = await api.saveStock({ med, units, perDose, unitLabel: unitLabel || guessUnitLabel(med) });
+    const idx = state.stocks.findIndex(s => s.key === stock.key);
+    if(idx >= 0) state.stocks[idx] = stock; else state.stocks.push(stock);
+    return stock;
+  }catch(e){
+    showToast(e.message);
+    return null;
+  }
+}
+
+// Comprimido, dose ou ml — tirado da apresentação do remédio no catálogo.
+function guessUnitLabel(med){
+  const found = state.catalog.medicines.find(m => medKeyOf(m.name) === medKeyOf(med));
+  const text = normalizeText(found ? `${found.name} ${found.presentation}` : med);
+  if(/gota/.test(text)) return 'gotas';
+  if(/ml|xarope|suspensao|solucao|frasco/.test(text)) return 'ml';
+  if(/capsula/.test(text)) return 'cápsulas';
+  if(/ampola|injet|dose/.test(text)) return 'doses';
+  return 'comprimidos';
+}
+
+// Caixa para informar/corrigir a quantidade (botões grandes + campo numérico).
+function askStock(med, { onSaved = null } = {}){
+  const stock = stockFor(med);
+  const label = stock ? stock.unitLabel : guessUnitLabel(med);
+  const perDose = stock ? stock.perDose : 1;
+  const options = [10, 20, 30, 60];
+  // O modal se fecha antes do clique ser tratado: guardamos o campo para ler o valor depois.
+  let input = null;
+  const back = showModal(ICON_RX, `Quantos ${label} de ${escapeHtml(med)} você tem?`,
+    `<span class="stock-ask">
+       <span class="stock-chips">
+         ${options.map(n => `<button type="button" class="rem-chip" data-units="${n}">${n}</button>`).join('')}
+       </span>
+       <label class="stock-field">
+         <span>Outra quantidade</span>
+         <input id="stock-units" type="number" min="0" max="9999" step="1" inputmode="numeric" value="${stock ? stock.units : ''}" placeholder="0">
+       </label>
+     </span>`,
+    [
+      { label: 'Salvar', primary: true, onClick: async () => {
+        const value = Number(input ? input.value : NaN);
+        if(!Number.isFinite(value) || value < 0 || (input && input.value === '')){
+          showToast('Digite quantas unidades você tem.');
+          return;
+        }
+        const saved = await saveStock(med, value, perDose, label);
+        if(saved){
+          showToast(`Anotado: ${unitsPhrase(saved)} de ${med} em casa.`);
+          renderReminders();
+          checkRefillWarnings();
+          if(onSaved) onSaved(saved);
+        }
+      }},
+      { label: 'Cancelar' },
+    ]);
+  input = back.querySelector('#stock-units');
+  if(input) input.focus();
+  // Os botões de atalho preenchem o campo.
+  back.querySelectorAll('[data-units]').forEach(button => {
+    button.onclick = () => {
+      if(input) input.value = button.dataset.units;
+      back.querySelectorAll('[data-units]').forEach(b => b.classList.toggle('active', b === button));
+    };
+  });
+}
+
 const refillKey = () => `trifarmas-refill:${state.user ? state.user.email : ''}`;
 const todayStamp = () => {
   const d = new Date();
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 };
 
-// Remédios cujos lembretes estão terminando: { med, lastDate, daysLeft, dosesLeft, totalDays }
-function treatmentsEndingSoon(){
+// Todos os remédios com lembrete, com o que importa para avisar sobre reposição.
+function treatmentSummary(){
   const today = startOfToday();
   const byMed = new Map();
   for(const r of state.reminders){
     const date = new Date(r.year, r.month, r.day);
-    const key = r.med.trim().toLowerCase();
+    const key = medKeyOf(r.med);
     const entry = byMed.get(key) || { med: r.med.trim(), lastDate: null, dosesLeft: 0, days: new Set() };
     entry.days.add(`${r.year}-${r.month}-${r.day}`);
     if(dayDiff(today, date) >= 0){
@@ -986,18 +1186,54 @@ function treatmentsEndingSoon(){
     }
     byMed.set(key, entry);
   }
-  return [...byMed.values()]
-    .filter(e => e.lastDate && e.days.size >= REFILL_MIN_DAYS)
-    .map(e => ({ med: e.med, lastDate: e.lastDate, dosesLeft: e.dosesLeft, totalDays: e.days.size,
-                 daysLeft: dayDiff(today, e.lastDate) }))
-    .filter(e => e.daysLeft <= REFILL_WARNING_DAYS)
+  return [...byMed.values()].map(e => {
+    const stock = stockFor(e.med);
+    return {
+      med: e.med,
+      lastDate: e.lastDate,
+      dosesLeft: e.dosesLeft,
+      totalDays: e.days.size,
+      scheduleDays: e.lastDate ? dayDiff(today, e.lastDate) : null,
+      perDay: dosesPerDay(e.med),
+      stock,
+      stockDays: stockDaysLeft(e.med),
+    };
+  });
+}
+
+// Quem precisa de aviso: ou o estoque de casa está acabando, ou os lembretes
+// estão no fim. O estoque manda, quando a pessoa informou quantos tem.
+function treatmentsEndingSoon(){
+  return treatmentSummary()
+    .filter(t => {
+      if(t.stock) return t.stockDays <= REFILL_WARNING_DAYS;
+      return t.lastDate && t.totalDays >= REFILL_MIN_DAYS && t.scheduleDays <= REFILL_WARNING_DAYS;
+    })
+    .map(t => ({ ...t, daysLeft: t.stock ? t.stockDays : t.scheduleDays, reason: t.stock ? 'estoque' : 'agenda' }))
     .sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
-const refillPhrase = daysLeft =>
-  daysLeft <= 0 ? 'o último lembrete é hoje'
-  : daysLeft === 1 ? 'o último lembrete é amanhã'
-  : `faltam só ${daysLeft} dias de lembrete`;
+// Frase principal do aviso, conforme o motivo.
+function refillPhrase(item){
+  if(typeof item === 'number') item = { daysLeft: item, reason: 'agenda' };
+  const days = item.daysLeft;
+  if(item.reason === 'estoque'){
+    if(item.stock && Number(item.stock.units) <= 0) return 'o remédio acabou em casa';
+    if(days <= 0) return 'o que tem em casa acaba hoje';
+    if(days === 1) return 'o que tem em casa dura só mais 1 dia';
+    return `o que tem em casa dura mais ${days} dias`;
+  }
+  if(days <= 0) return 'o último lembrete é hoje';
+  if(days === 1) return 'o último lembrete é amanhã';
+  return `faltam só ${days} dias de lembrete`;
+}
+
+// Detalhe do estoque: "12 comprimidos · 2 por dia".
+function stockDetail(item){
+  if(!item.stock) return '';
+  const perDay = item.perDay * (item.stock.perDose || 1);
+  return `${unitsPhrase(item.stock)} em casa · ${perDay} por dia`;
+}
 
 // Cartão no topo da aba Lembretes.
 function renderRefillAlert(){
@@ -1015,17 +1251,26 @@ function renderRefillAlert(){
       <b>${ending.length === 1 ? 'Seu remédio está acabando' : 'Seus remédios estão acabando'}</b>
     </div>
     <p>Compre antes de terminar para não ficar sem tomar.</p>
-    ${ending.map(item => `
+    ${ending.map(item => {
+      const arg = `'${escapeHtml(item.med).replace(/'/g, "\\'")}'`;
+      const detail = [
+        stockDetail(item),
+        item.lastDate ? `lembretes até ${dayName(item.lastDate)}` : '',
+      ].filter(Boolean).join(' · ');
+      return `
       <div class="refill-item">
         <div class="refill-text">
           <b>${escapeHtml(item.med)}</b>
-          <span>${refillPhrase(item.daysLeft)} · termina ${dayName(item.lastDate)}${item.dosesLeft ? ` · ${item.dosesLeft} ${item.dosesLeft === 1 ? 'dose marcada' : 'doses marcadas'}` : ''}</span>
+          <span><b class="refill-when">${refillPhrase(item)}</b>${detail ? ` · ${detail}` : ''}</span>
         </div>
         <div class="refill-actions">
-          <button class="btn btn-primary" onclick="buyAgain('${escapeHtml(item.med).replace(/'/g, "\\'")}')">Comprar de novo</button>
-          <button class="btn-outline-sm" onclick="extendTreatment('${escapeHtml(item.med).replace(/'/g, "\\'")}')">Agendar mais dias</button>
+          <button class="btn btn-primary" onclick="buyAgain(${arg})">Comprar de novo</button>
+          <button class="btn-outline-sm" onclick="askStock(${arg})">${item.stock ? 'Atualizar quantidade' : 'Tenho em casa'}</button>
+          ${item.scheduleDays !== null && item.scheduleDays <= REFILL_WARNING_DAYS
+            ? `<button class="btn-outline-sm" onclick="extendTreatment(${arg})">Agendar mais dias</button>` : ''}
         </div>
-      </div>`).join('')}`;
+      </div>`;
+    }).join('')}`;
   box.classList.remove('hidden');
 }
 
@@ -1051,12 +1296,12 @@ function checkRefillWarnings(){
 
   pending.forEach(item => { seen[item.med.toLowerCase()] = today; });
   storage.set(refillKey(), seen);
-  pending.forEach(item => notify('Remédio acabando', `${item.med}: ${refillPhrase(item.daysLeft)}. Reponha para não ficar sem.`));
+  pending.forEach(item => notify('Remédio acabando', `${item.med}: ${refillPhrase(item)}. Reponha para não ficar sem.`));
 
   const first = pending[0];
   const others = pending.length - 1;
   showModal(ICON_RX, 'Está na hora de repor',
-    `<b>${escapeHtml(first.med)}</b>: ${refillPhrase(first.daysLeft)} (termina ${dayName(first.lastDate)}).` +
+    `<b>${escapeHtml(first.med)}</b>: ${refillPhrase(first)}${first.stock ? ` (${unitsPhrase(first.stock)} em casa)` : (first.lastDate ? ` (termina ${dayName(first.lastDate)})` : '')}.` +
     (others > 0 ? ` Outro${others > 1 ? 's' : ''} ${others} remédio${others > 1 ? 's' : ''} também ${others > 1 ? 'estão' : 'está'} acabando.` : '') +
     ' Quer comparar o preço e comprar agora?',
     [
@@ -1106,7 +1351,18 @@ const REPEAT_OPTIONS = [
   { label: '30 dias',     days: 30 },
 ];
 
-const reminderForm = { time: '08:00', date: null, repeatDays: 1, calendarOpen: false, saving: false };
+const UNIT_PRESETS = [10, 20, 30, 60];
+const PER_DOSE_OPTIONS = [
+  { label: '1 por vez', value: 1 },
+  { label: '2 por vez', value: 2 },
+  { label: '3 por vez', value: 3 },
+];
+
+const reminderForm = {
+  time: '08:00', date: null, repeatDays: 1, calendarOpen: false, saving: false,
+  units: null,      // quantidade em casa informada no passo 4 (null = não informou)
+  perDose: 1,
+};
 
 const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
 const addDays = (date, days) => { const d = new Date(date); d.setDate(d.getDate() + days); d.setHours(0,0,0,0); return d; };
@@ -1162,6 +1418,24 @@ function toggleReminderCalendar(){
   reminderForm.calendarOpen = !reminderForm.calendarOpen;
   renderReminders();
 }
+// Passo 4: quantas unidades a pessoa tem em casa (e quantas toma por vez).
+function setReminderUnits(value, fromInput = false){
+  const units = value === '' || value === null ? null : Number(value);
+  reminderForm.units = Number.isFinite(units) && units >= 0 ? units : null;
+  if(!fromInput){
+    const input = $('rem-units');
+    if(input) input.value = reminderForm.units === null ? '' : reminderForm.units;
+  }
+  renderReminderChips();
+  renderReminderSummary();
+}
+
+function setReminderPerDose(perDose){
+  reminderForm.perDose = perDose;
+  renderReminderChips();
+  renderReminderSummary();
+}
+
 function setReminderRepeat(days){
   reminderForm.repeatDays = days;
   renderReminderChips();
@@ -1213,6 +1487,13 @@ function renderReminderChips(){
     chip(diff > 1 ? dayName(chosen) : 'Outro dia', diff > 1, 'data-day="pick"'),
   ].join('');
 
+  $('rem-units-chips').innerHTML = UNIT_PRESETS
+    .map(n => chip(String(n), reminderForm.units === n, `data-units="${n}"`))
+    .join('') + chip('Não sei agora', reminderForm.units === null, 'data-units="nao-sei"');
+  $('rem-perdose-chips').innerHTML = PER_DOSE_OPTIONS
+    .map(option => chip(option.label, reminderForm.perDose === option.value, `data-perdose="${option.value}"`))
+    .join('');
+
   $('rem-repeat-chips').innerHTML = REPEAT_OPTIONS
     .map(option => chip(option.label, reminderForm.repeatDays === option.days, `data-repeat="${option.days}"`))
     .join('');
@@ -1226,8 +1507,17 @@ function renderReminderSummary(){
   const when = days === 1
     ? `${dayName(start)}`
     : `todos os dias, de ${dayName(start)} até ${dayName(addDays(start, days - 1))}`;
+  // Com a quantidade informada, já mostra para quantos dias dá o que tem em casa.
+  let stockLine = '';
+  if(reminderForm.units !== null){
+    const label = guessUnitLabel(med || 'remédio');
+    const perDay = reminderForm.perDose;   // 1 lembrete por dia neste formulário
+    const lasts = Math.floor(reminderForm.units / Math.max(1, perDay));
+    stockLine = ` Você tem <b>${reminderForm.units} ${label}</b> em casa: dá para <b>${lasts} ${lasts === 1 ? 'dia' : 'dias'}</b>`
+      + (lasts <= REFILL_WARNING_DAYS ? ' — vamos avisar para comprar mais.' : ', e avisamos quando estiver acabando.');
+  }
   $('rem-summary').innerHTML =
-    `Vamos avisar você de tomar ${name} às <b>${reminderForm.time}</b> ${periodOfDay(reminderForm.time)}, ${when}.`;
+    `Vamos avisar você de tomar ${name} às <b>${reminderForm.time}</b> ${periodOfDay(reminderForm.time)}, ${when}.${stockLine}`;
   $('rem-save').textContent = days === 1 ? 'Criar lembrete' : `Criar ${days} lembretes`;
 }
 
@@ -1289,6 +1579,14 @@ async function addReminder(){
       showToast(e.message);
       break;
     }
+  }
+
+  // Guarda quantas unidades a pessoa disse ter em casa (passo 4).
+  if(created && reminderForm.units !== null){
+    await saveStock(med, reminderForm.units, reminderForm.perDose);
+    reminderForm.units = null;
+    const unitsInput = $('rem-units');
+    if(unitsInput) unitsInput.value = '';
   }
 
   reminderForm.saving = false;
@@ -1377,12 +1675,21 @@ function renderReminderList(){
     const when = group.dates.length === 1
       ? `${dayName(first).charAt(0).toUpperCase()}${dayName(first).slice(1)}`
       : `De ${first.getDate()} a ${last.getDate()} de ${MONTHS[last.getMonth()].toLowerCase()} · ${group.dates.length} dias`;
+    const stock = stockFor(group.med);
+    const daysLeft = stockDaysLeft(group.med);
+    const arg = `'${escapeHtml(group.med).replace(/'/g, "\\'")}'`;
+    const stockLine = stock
+      ? `<button class="rem-stock ${daysLeft !== null && daysLeft <= REFILL_WARNING_DAYS ? 'low' : ''}" onclick="askStock(${arg})">
+           ${unitsPhrase(stock)} em casa${daysLeft !== null ? ` · dá para ${daysLeft} ${daysLeft === 1 ? 'dia' : 'dias'}` : ''}
+         </button>`
+      : `<button class="rem-stock add" onclick="askStock(${arg})">Informar quantos tem em casa</button>`;
     return `
     <div class="rem-item ${group.pending ? '' : 'done'}">
       <div class="rem-time">${group.time}</div>
       <div class="rem-info">
         <p>${escapeHtml(group.med)}</p>
         <span>${when}${group.pending ? '' : ' · já avisado'}</span>
+        ${stockLine}
       </div>
       <button class="rem-del" onclick="removeReminderGroup([${group.ids.join(',')}])" aria-label="Apagar lembrete">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a1 1 0 01-1 1H7a1 1 0 01-1-1V6h12z"/></svg>
@@ -1564,6 +1871,14 @@ function bindReminderChips(){
     const button = event.target.closest('[data-repeat]');
     if(button) setReminderRepeat(Number(button.dataset.repeat));
   });
+  $('rem-units-chips').addEventListener('click', event => {
+    const button = event.target.closest('[data-units]');
+    if(button) setReminderUnits(button.dataset.units === 'nao-sei' ? null : Number(button.dataset.units));
+  });
+  $('rem-perdose-chips').addEventListener('click', event => {
+    const button = event.target.closest('[data-perdose]');
+    if(button) setReminderPerDose(Number(button.dataset.perdose));
+  });
 }
 
 function initApp(){
@@ -1575,5 +1890,10 @@ function initApp(){
   applyFontScale(Number(storage.get('trifarmas-font-scale')) || 1);
   showView('login');
   initGoogleSignIn();
-  loadCatalog();
+
+  // 1) catálogo guardado no aparelho entra na hora; 2) o servidor é acordado
+  // enquanto a pessoa digita a senha; 3) a versão nova do catálogo chega depois.
+  const hadCache = loadCachedCatalog();
+  api.warmUp();
+  loadCatalog({ silent: hadCache });
 }

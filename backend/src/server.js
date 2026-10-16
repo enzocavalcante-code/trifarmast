@@ -15,13 +15,21 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '12mb' })); // fotos de perfil e receitas chegam como data URL
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+// Usado também para "acordar" o serviço gratuito do Render enquanto a pessoa
+// digita a senha: com ?warm=1 abre uma conexão com o banco antes do login.
+app.get('/health', async (req, res) => {
+  if (req.query.warm) {
+    try { await require('./db').query('SELECT 1'); } catch { /* responde ok mesmo assim */ }
+  }
+  res.json({ ok: true });
+});
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/catalog'));
 app.use('/api/me', requireAuth, require('./routes/me'));
 app.use('/api/orders', requireAuth, require('./routes/orders'));
 app.use('/api/reminders', requireAuth, require('./routes/reminders'));
+app.use('/api/stocks', requireAuth, require('./routes/stocks'));
 app.use('/api/points', requireAuth, require('./routes/points'));
 app.use('/api/places', requireAuth, require('./routes/places'));
 

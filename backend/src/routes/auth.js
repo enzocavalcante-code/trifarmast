@@ -6,6 +6,7 @@ const { hashPassword, checkPassword, signToken } = require('../auth');
 const { HttpError, asyncHandler } = require('../errors');
 const { isValidAvatar } = require('../images');
 const serialize = require('../serializers');
+const { loadAccountData } = require('../account');
 
 const router = express.Router();
 const googleClient = new OAuth2Client(config.googleClientId);
@@ -20,15 +21,19 @@ const largeGooglePhoto = url => (url ? url.replace(/=s\d+(-c)?$/, '=s256-c') : n
 
 // Responde com a sessão. A mensagem de boas-vindas só é liberada uma vez por
 // conta: o mesmo comando que a libera já marca como vista no banco.
+// A resposta já traz pedidos, lembretes e pontos ("data"): assim o app entra na
+// conta com uma requisição só, em vez de quatro — muita diferença no 4G.
 async function sendSession(res, userRow, isNewUser) {
-  const { rowCount } = await query(
-    'UPDATE users SET welcome_seen = TRUE WHERE id = $1 AND welcome_seen = FALSE', [userRow.id]
-  );
+  const [welcome, data] = await Promise.all([
+    query('UPDATE users SET welcome_seen = TRUE WHERE id = $1 AND welcome_seen = FALSE', [userRow.id]),
+    loadAccountData(userRow.id).catch(() => null),   // se falhar, o app busca depois
+  ]);
   res.json({
     token: signToken(userRow.id),
     user: serialize.user(userRow),
     isNewUser,
-    showWelcome: rowCount === 1,
+    showWelcome: welcome.rowCount === 1,
+    data,
   });
 }
 

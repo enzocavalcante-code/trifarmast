@@ -37,8 +37,21 @@ const api = (() => {
   const patch = (path, body) => request('PATCH', path, body);
   const del = path => request('DELETE', path);
 
+  // "Acorda" a API gratuita do Render enquanto a pessoa ainda está na tela de
+  // login: sem isso, o primeiro acesso do dia espera o servidor subir (~50 s).
+  let warmingUp = null;
+  function warmUp() {
+    if (warmingUp) return warmingUp;
+    const started = Date.now();
+    warmingUp = fetch(`${BASE.replace(/\/api$/, '')}/health?warm=1`, { cache: 'no-store' })
+      .then(() => ({ ok: true, ms: Date.now() - started }))
+      .catch(() => ({ ok: false, ms: Date.now() - started }));
+    return warmingUp;
+  }
+
   return {
     setToken: t => { token = t; },
+    warmUp,
 
     // Autenticação
     login: (email, password) => post('/auth/login', { email, password }),
@@ -64,7 +77,13 @@ const api = (() => {
     reminders: () => get('/reminders'),
     addReminder: data => post('/reminders', data),
     removeReminder: id => del(`/reminders/${id}`),
-    markRemindersFired: ids => post('/reminders/fired', { ids }),
+    // consume=false: lembrete vencido há horas, não desconta do estoque
+    markRemindersFired: (ids, consume = true) => post('/reminders/fired', { ids, consume }),
+
+    // Estoque em casa (quantas unidades a pessoa tem de cada remédio)
+    stocks: () => get('/stocks'),
+    saveStock: data => request('PUT', '/stocks', data),
+    removeStock: key => del(`/stocks/${encodeURIComponent(key)}`),
 
     // Localização (farmácias próximas e endereços)
     nearbyPharmacies: (lat, lng) => get(`/places/pharmacies?lat=${lat}&lng=${lng}`),

@@ -3,23 +3,13 @@ const { query, transaction } = require('../db');
 const { HttpError, asyncHandler } = require('../errors');
 const { addPoints } = require('../points');
 const serialize = require('../serializers');
+const { loadPoints } = require('../account');
 
 const router = express.Router();
 
 // Resumo do programa de pontos: saldo, pontos a receber, cupons e extrato.
 router.get('/', asyncHandler(async (req, res) => {
-  const [user, pending, coupons, history] = await Promise.all([
-    query('SELECT points FROM users WHERE id = $1', [req.userId]),
-    query('SELECT COALESCE(SUM(points_earned), 0)::int AS total FROM orders WHERE user_id = $1 AND NOT completed', [req.userId]),
-    query('SELECT * FROM user_coupons WHERE user_id = $1 AND used_order_id IS NULL ORDER BY created_at', [req.userId]),
-    query('SELECT delta, description, created_at FROM points_history WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT 30', [req.userId]),
-  ]);
-  res.json({
-    points: user.rows[0].points,
-    pending: pending.rows[0].total,
-    coupons: coupons.rows.map(serialize.coupon),
-    history: history.rows.map(h => ({ delta: h.delta, description: h.description, createdAt: h.created_at })),
-  });
+  res.json(await loadPoints(req.userId));
 }));
 
 // Troca pontos por um cupom de desconto.

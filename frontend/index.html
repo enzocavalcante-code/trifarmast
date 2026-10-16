@@ -8,7 +8,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" type="image/png" href="assets/favicon.png">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
+      media="print" onload="this.media='all'">   <!-- só é usado na aba do mapa: não atrasa a tela de login -->
 <link rel="stylesheet" href="styles.css">
 <script src="https://accounts.google.com/gsi/client" async defer onload="onGsiLoad()"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" defer></script>
@@ -224,6 +225,22 @@
             <div class="rem-repeat">
               <p>Tomar por quantos dias?</p>
               <div class="rem-chips" id="rem-repeat-chips"></div>
+            </div>
+          </div>
+
+          <!-- 4. quantidade em casa -->
+          <div class="rem-step">
+            <div class="rem-step-head"><span class="rem-step-num">4</span><h3>Quantos você tem em casa?</h3></div>
+            <p class="rem-step-help">Assim avisamos antes de acabar, com tempo de comprar mais.</p>
+            <div class="rem-chips" id="rem-units-chips"></div>
+            <label class="rem-exact">
+              <span>Outra quantidade</span>
+              <input id="rem-units" type="number" min="0" max="9999" step="1" inputmode="numeric" placeholder="0"
+                     oninput="setReminderUnits(this.value, true)">
+            </label>
+            <div class="rem-perdose">
+              <p>Quantos você toma por vez?</p>
+              <div class="rem-chips" id="rem-perdose-chips"></div>
             </div>
           </div>
 
