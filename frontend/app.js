@@ -139,6 +139,8 @@ function showView(name){
   $('view-login').classList.toggle('hidden', name!=='login');
   $('view-signup').classList.toggle('hidden', name!=='signup');
   $('login-error').classList.add('hidden');
+  // Voltando para a tela inicial, o convite do Google não faz mais sentido.
+  if(name !== 'signup' && typeof hideGoogleInvite === 'function') hideGoogleInvite();
   renderGoogleButtons();
 }
 
@@ -279,18 +281,77 @@ function renderGoogleButtons(){
   google.accounts.id.renderButton($('google-btn-signup'), { ...buttonOptions, text:'signup_with' });
 }
 
+const ICON_GOOGLE_G = '<svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.6 29.3 35.5 24 35.5c-6.4 0-11.7-4.6-12.8-10.8-.2-1-.2-2 0-3C12.3 15.6 17.6 11 24 11c3.1 0 5.9 1.2 8 3.1l6-6C34.6 4.9 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.2-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.7 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l6-6C34.6 6.9 29.6 5 24 5c-7.6 0-14.1 4.3-17.7 9.7z"/><path fill="#4CAF50" d="M24 45c5.5 0 10.4-1.8 14.2-4.9l-6.6-5.5C29.6 36.4 26.9 37.5 24 37.5c-5.3 0-9.7-2.9-11.3-7.4l-6.6 5.1C9.7 41 16.3 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l6.6 5.5C38.9 40.8 45 35.5 45 24c0-1.2-.1-2.3-.4-3.5z"/></svg>';
+
+// Conta Google que tentou entrar sem ter cadastro (fica guardada até criar a conta).
+let pendingGoogleSignup = null;
+
+const isSignupView = () => !$('view-signup').classList.contains('hidden');
+
 /* O Google devolve um ID Token (JWT) assinado. Ele é enviado ao backend,
-   que valida a assinatura, cria/recupera a conta e atualiza a foto. */
+   que valida a assinatura, recupera (ou cria, no cadastro) a conta e atualiza a foto. */
 async function handleGoogleCredential(response){
+  // Botão da tela inicial: só entra em conta que já existe. Botão da tela de cadastro: cria.
+  const mode = isSignupView() ? 'signup' : 'login';
   try{
-    const session = await api.googleLogin(response.credential);
+    const session = await api.googleLogin(response.credential, mode);
     const firstName = session.user.name.split(' ')[0];
     showToast(session.isNewUser
-      ? 'Conta Google conectada! Bem-vindo(a) ao Trifarmas.'
+      ? 'Conta criada com o Google! Bem-vindo(a) ao Trifarmas.'
       : `Login com Google realizado! Bem-vindo(a) de volta, ${firstName}.`);
     await enterApp(session);
   }catch(e){
+    if(e.code === 'google_account_missing'){
+      inviteGoogleSignup(e.data.profile, { credential: response.credential });
+      return;
+    }
     showToast(e.message);
+  }
+}
+
+/* Sem conta no Trifarmas: leva para a tela de criar conta, já com os dados do Google. */
+function inviteGoogleSignup(profile, { credential = null, demo = false } = {}){
+  pendingGoogleSignup = { profile, credential, demo };
+  showView('signup');
+  $('signup-name').value = profile.name || '';
+  $('signup-email').value = profile.email || '';
+
+  const box = $('google-invite');
+  box.innerHTML = `
+    <div class="gi-head">
+      ${ICON_GOOGLE_G}
+      <b>Você ainda não tem conta no Trifarmas</b>
+    </div>
+    <p>A Conta Google <b>${escapeHtml(profile.email)}</b> ainda não tem cadastro aqui. Crie a sua agora, em um toque:</p>
+    <button class="btn btn-primary gi-btn" onclick="confirmGoogleSignup()">${ICON_GOOGLE_G} Criar conta com o Google</button>
+    <p class="gi-or">Ou preencha os campos abaixo para criar uma conta com e-mail e senha.</p>`;
+  box.classList.remove('hidden');
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function hideGoogleInvite(){
+  pendingGoogleSignup = null;
+  const box = $('google-invite');
+  if(box){ box.classList.add('hidden'); box.innerHTML = ''; }
+}
+
+/* Cria a conta com o mesmo acesso do Google que a pessoa acabou de usar. */
+async function confirmGoogleSignup(){
+  if(!pendingGoogleSignup) return;
+  const { credential, demo } = pendingGoogleSignup;
+  const button = document.querySelector('#google-invite .gi-btn');
+  if(button){ button.disabled = true; button.textContent = 'Criando sua conta…'; }
+  try{
+    const session = demo ? await api.googleDemo('signup') : await api.googleLogin(credential, 'signup');
+    hideGoogleInvite();
+    showToast('Conta criada com o Google! Bem-vindo(a) ao Trifarmas.');
+    await enterApp(session);
+  }catch(e){
+    if(button){ button.disabled = false; button.innerHTML = `${ICON_GOOGLE_G} Criar conta com o Google`; }
+    // O acesso do Google vale por pouco tempo: se expirar, é só tocar no botão do Google de novo.
+    showToast(e.status === 401
+      ? 'O acesso do Google expirou. Toque no botão “Inscrever-se com o Google” aqui embaixo.'
+      : e.message);
   }
 }
 
@@ -298,9 +359,15 @@ async function handleGoogleCredential(response){
 async function googleAuthDemo(mode){
   try{
     const session = await api.googleDemo(mode);
-    showToast('Entrou com a conta demo (configure o GOOGLE_CLIENT_ID para login real).');
+    showToast(session.isNewUser
+      ? 'Conta demo criada (configure o GOOGLE_CLIENT_ID para login real).'
+      : 'Entrou com a conta demo (configure o GOOGLE_CLIENT_ID para login real).');
     await enterApp(session);
   }catch(e){
+    if(e.code === 'google_account_missing'){
+      inviteGoogleSignup(e.data.profile, { demo: true });
+      return;
+    }
     showToast(e.message);
   }
 }
@@ -376,6 +443,7 @@ async function enterApp(session){
   $('view-login').classList.add('hidden');
   $('view-signup').classList.add('hidden');
   $('app').classList.remove('hidden');
+  hideGoogleInvite();
 
   refreshProfileUI();
   $('settings-pass-section').classList.toggle('hidden', !!state.user.googleAccount);

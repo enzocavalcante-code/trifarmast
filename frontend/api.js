@@ -21,7 +21,14 @@ const api = (() => {
     }
     if (res.status === 204) return null;
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Algo deu errado. Tente novamente.');
+    if (!res.ok) {
+      // Alguns erros trazem informação extra (ex.: conta Google sem cadastro).
+      const error = new Error(data.error || 'Algo deu errado. Tente novamente.');
+      error.code = data.code || null;
+      error.status = res.status;
+      error.data = data;
+      throw error;
+    }
     return data;
   }
 
@@ -36,7 +43,8 @@ const api = (() => {
     // Autenticação
     login: (email, password) => post('/auth/login', { email, password }),
     signup: data => post('/auth/signup', data),
-    googleLogin: credential => post('/auth/google', { credential }),
+    // mode: 'login' (tela inicial, só entra em conta existente) ou 'signup' (cria a conta)
+    googleLogin: (credential, mode = 'login') => post('/auth/google', { credential, mode }),
     googleDemo: mode => post('/auth/google-demo', { mode }),
 
     // Perfil

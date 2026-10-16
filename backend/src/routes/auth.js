@@ -41,6 +41,27 @@ async function createUser(client, { name, email, passwordHash = null, googleAcco
   return user;
 }
 
+// Pelo botão da tela inicial (mode 'login') o Google só entra em conta que já existe:
+// sem cadastro, o app leva a pessoa para a tela de criar conta. Pelo botão da tela de
+// cadastro (mode 'signup') a conta é criada.
+function requireExistingAccount(mode) {
+  return mode !== 'signup';
+}
+
+async function findUserByEmail(email) {
+  const { rows } = await query('SELECT 1 FROM users WHERE email = $1', [email]);
+  return rows.length > 0;
+}
+
+// Resposta de "ainda não tem conta": o app usa os dados para abrir o cadastro já preenchido.
+function sendNeedsSignup(res, profile) {
+  res.status(404).json({
+    error: 'Você ainda não tem conta no Trifarmas com esta Conta Google.',
+    code: 'google_account_missing',
+    profile,
+  });
+}
+
 // Login com Google: cria a conta na primeira vez; nas próximas, atualiza a foto
 // do Google — a menos que o usuário tenha escolhido uma foto manualmente.
 async function upsertGoogleUser({ name, email, picture }) {
@@ -113,11 +134,17 @@ router.post('/google', asyncHandler(async (req, res) => {
   }
   if (!payload || !payload.email) throw new HttpError(401, 'Não foi possível ler os dados da sua conta Google.');
 
-  const { row, isNewUser } = await upsertGoogleUser({
+  const profile = {
     name: payload.name || payload.email.split('@')[0],
     email: normalizeEmail(payload.email),
     picture: largeGooglePhoto(payload.picture),
-  });
+  };
+  // Veio da tela inicial e não existe conta: manda criar a conta em vez de criar sozinho.
+  if (requireExistingAccount(req.body.mode) && !(await findUserByEmail(profile.email))) {
+    return sendNeedsSignup(res, profile);
+  }
+
+  const { row, isNewUser } = await upsertGoogleUser(profile);
   await sendSession(res, row, isNewUser);
 }));
 
@@ -125,11 +152,12 @@ router.post('/google', asyncHandler(async (req, res) => {
 // Usa sempre a mesma conta, para que dados e mensagem de boas-vindas se comportem como numa conta real.
 router.post('/google-demo', asyncHandler(async (req, res) => {
   if (!config.allowDemoGoogle) throw new HttpError(403, 'Conta demo desativada.');
-  const { row, isNewUser } = await upsertGoogleUser({
-    name: 'Conta Demo Google',
-    email: 'demo.google@trifarmas.app',
-    picture: null,
-  });
+  const profile = { name: 'Conta Demo Google', email: 'demo.google@trifarmas.app', picture: null };
+  // Mesma regra do login real: pela tela inicial, sem conta criada, vai para o cadastro.
+  if (requireExistingAccount(req.body.mode) && !(await findUserByEmail(profile.email))) {
+    return sendNeedsSignup(res, profile);
+  }
+  const { row, isNewUser } = await upsertGoogleUser(profile);
   await sendSession(res, row, isNewUser);
 }));
 
