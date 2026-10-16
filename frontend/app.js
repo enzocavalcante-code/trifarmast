@@ -918,7 +918,9 @@ function requestNotificationPermission(){
 function startReminderEngine(){
   if(reminderCheckInterval) clearInterval(reminderCheckInterval);
   checkDueReminders();
-  reminderCheckInterval = setInterval(checkDueReminders, 20000);
+  // Espera o pop-up de boas-vindas sair antes de falar de reposição.
+  setTimeout(checkRefillWarnings, 1500);
+  reminderCheckInterval = setInterval(() => { checkDueReminders(); checkRefillWarnings(); }, 20000);
 }
 
 function checkDueReminders(){
@@ -941,15 +943,148 @@ function checkDueReminders(){
 }
 
 function fireReminderNotification(r){
-  const title = 'Hora do remédio';
-  const body = `${r.med} — ${r.time}`;
+  notify('Hora do remédio', `${r.med} — ${r.time}`);
+}
+
+// Notificação do navegador; se estiver bloqueada, avisa dentro do app.
+function notify(title, body){
   if('Notification' in window && Notification.permission === 'granted'){
     try{
-      new Notification(title, {body, icon: 'assets/favicon.png'});
+      new Notification(title, { body, icon: 'assets/favicon.png' });
       return;
     }catch{ /* cai no aviso interno abaixo */ }
   }
   showToast(`${title}: ${body}`);
+}
+
+/* ---------------- aviso de remédio acabando ----------------
+   Quem agenda um tratamento (7, 15, 30 dias) precisa comprar de novo antes
+   de acabar. Nos últimos dias de lembrete o app avisa para repor: um cartão
+   na aba Lembretes, um ponto na navegação e um aviso por dia. */
+
+const REFILL_WARNING_DAYS = 5;   // começa a avisar faltando 5 dias
+const REFILL_MIN_DAYS = 3;       // só vale para tratamento (não para um lembrete solto)
+
+const refillKey = () => `trifarmas-refill:${state.user ? state.user.email : ''}`;
+const todayStamp = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+};
+
+// Remédios cujos lembretes estão terminando: { med, lastDate, daysLeft, dosesLeft, totalDays }
+function treatmentsEndingSoon(){
+  const today = startOfToday();
+  const byMed = new Map();
+  for(const r of state.reminders){
+    const date = new Date(r.year, r.month, r.day);
+    const key = r.med.trim().toLowerCase();
+    const entry = byMed.get(key) || { med: r.med.trim(), lastDate: null, dosesLeft: 0, days: new Set() };
+    entry.days.add(`${r.year}-${r.month}-${r.day}`);
+    if(dayDiff(today, date) >= 0){
+      entry.dosesLeft++;
+      if(!entry.lastDate || date > entry.lastDate) entry.lastDate = date;
+    }
+    byMed.set(key, entry);
+  }
+  return [...byMed.values()]
+    .filter(e => e.lastDate && e.days.size >= REFILL_MIN_DAYS)
+    .map(e => ({ med: e.med, lastDate: e.lastDate, dosesLeft: e.dosesLeft, totalDays: e.days.size,
+                 daysLeft: dayDiff(today, e.lastDate) }))
+    .filter(e => e.daysLeft <= REFILL_WARNING_DAYS)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
+const refillPhrase = daysLeft =>
+  daysLeft <= 0 ? 'o último lembrete é hoje'
+  : daysLeft === 1 ? 'o último lembrete é amanhã'
+  : `faltam só ${daysLeft} dias de lembrete`;
+
+// Cartão no topo da aba Lembretes.
+function renderRefillAlert(){
+  const box = $('refill-alert');
+  if(!box) return;
+  const ending = treatmentsEndingSoon();
+  if(!ending.length){
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = `
+    <div class="refill-head">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L2.8 17a2 2 0 001.7 3h15a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+      <b>${ending.length === 1 ? 'Seu remédio está acabando' : 'Seus remédios estão acabando'}</b>
+    </div>
+    <p>Compre antes de terminar para não ficar sem tomar.</p>
+    ${ending.map(item => `
+      <div class="refill-item">
+        <div class="refill-text">
+          <b>${escapeHtml(item.med)}</b>
+          <span>${refillPhrase(item.daysLeft)} · termina ${dayName(item.lastDate)}${item.dosesLeft ? ` · ${item.dosesLeft} ${item.dosesLeft === 1 ? 'dose marcada' : 'doses marcadas'}` : ''}</span>
+        </div>
+        <div class="refill-actions">
+          <button class="btn btn-primary" onclick="buyAgain('${escapeHtml(item.med).replace(/'/g, "\\'")}')">Comprar de novo</button>
+          <button class="btn-outline-sm" onclick="extendTreatment('${escapeHtml(item.med).replace(/'/g, "\\'")}')">Agendar mais dias</button>
+        </div>
+      </div>`).join('')}`;
+  box.classList.remove('hidden');
+}
+
+// Ponto na navegação (aba Lembretes), igual ao dos pedidos.
+function updateRemindersBadge(){
+  const count = treatmentsEndingSoon().length;
+  document.querySelectorAll('[data-tab="calendar"] .nav-badge, [data-tab="calendar"] .bn-dot').forEach(el => el.remove());
+  if(!count) return;
+  const sideBtn = document.querySelector('.nav-item[data-tab="calendar"]');
+  if(sideBtn) sideBtn.insertAdjacentHTML('beforeend', `<span class="nav-badge">${count}</span>`);
+  const bnBtn = document.querySelector('.bn-item[data-tab="calendar"]');
+  if(bnBtn) bnBtn.insertAdjacentHTML('beforeend', '<span class="bn-dot"></span>');
+}
+
+// Avisa uma vez por dia para cada remédio (notificação + aviso na tela).
+function checkRefillWarnings(){
+  if(!state.user) return;
+  updateRemindersBadge();
+  const seen = storage.get(refillKey()) || {};
+  const today = todayStamp();
+  const pending = treatmentsEndingSoon().filter(item => seen[item.med.toLowerCase()] !== today);
+  if(!pending.length) return;
+
+  pending.forEach(item => { seen[item.med.toLowerCase()] = today; });
+  storage.set(refillKey(), seen);
+  pending.forEach(item => notify('Remédio acabando', `${item.med}: ${refillPhrase(item.daysLeft)}. Reponha para não ficar sem.`));
+
+  const first = pending[0];
+  const others = pending.length - 1;
+  showModal(ICON_RX, 'Está na hora de repor',
+    `<b>${escapeHtml(first.med)}</b>: ${refillPhrase(first.daysLeft)} (termina ${dayName(first.lastDate)}).` +
+    (others > 0 ? ` Outro${others > 1 ? 's' : ''} ${others} remédio${others > 1 ? 's' : ''} também ${others > 1 ? 'estão' : 'está'} acabando.` : '') +
+    ' Quer comparar o preço e comprar agora?',
+    [
+      { label: 'Comprar de novo', primary: true, onClick: () => buyAgain(first.med) },
+      { label: 'Ver meus lembretes', onClick: () => switchTab('calendar') },
+      { label: 'Agora não' },
+    ]);
+}
+
+// Leva para a busca já procurando o remédio que está acabando.
+function buyAgain(med){
+  switchTab('home');
+  const input = $('search-input');
+  input.value = med;
+  onSearchInput();
+  setTimeout(() => { $('results-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 120);
+}
+
+// Continua o tratamento: abre o formulário já preenchido, a partir do dia seguinte ao último.
+function extendTreatment(med){
+  const item = treatmentsEndingSoon().find(t => t.med.toLowerCase() === med.toLowerCase());
+  switchTab('calendar');
+  $('rem-med').value = med;
+  reminderForm.date = addDays(item ? item.lastDate : startOfToday(), 1);
+  reminderForm.repeatDays = 7;
+  renderReminders();
+  $('rem-med').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  showToast('Escolha o horário e confirme para continuar o tratamento.');
 }
 
 /* ---------------- tela de lembretes ----------------
@@ -1036,6 +1171,8 @@ function setReminderRepeat(days){
 /* ---- desenho da tela ---- */
 
 function renderReminders(){
+  renderRefillAlert();
+  updateRemindersBadge();
   if(!reminderForm.date) reminderForm.date = startOfToday();
   renderReminderTime();
   renderReminderChips();
@@ -1158,6 +1295,10 @@ async function addReminder(){
   button.disabled = false;
   if(created){
     $('rem-med').value = '';
+    // Quem acabou de agendar não precisa do pop-up de reposição agora.
+    const seen = storage.get(refillKey()) || {};
+    seen[med.trim().toLowerCase()] = todayStamp();
+    storage.set(refillKey(), seen);
     showToast(created === 1
       ? `Pronto! Vamos avisar às ${reminderForm.time}.`
       : `Pronto! ${created} lembretes criados às ${reminderForm.time}.`);
