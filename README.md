@@ -45,11 +45,11 @@ O projeto ainda está em desenvolvimento e as próximas atualizações serão vo
 - [x] Lembretes de remédio em três passos, com repetição por vários dias
 - [x] Ver a senha enquanto digita
 - [x] Modo escuro e tamanho do texto ajustável
-- [ ] Ler a receita pela câmera e achar o remédio mais barato
-- [ ] Preços de verdade (tabela da CMED e dados das farmácias, quando o projeto real for feito)
-- [ ] Pagamento de verdade com Pix(quando o projeto real for feito)
-- [ ] Retirada confirmada pela própria farmácia, no balcão(quando o projeto real for feito)
-- [ ] Aplicativo para Android e IOS(quando o projeto real for feito)
+- [ ] Ler a receita pela câmera e achar o remédio mais barato(com integração de IA)
+- [ ] Preços de verdade (tabela da CMED e dados das farmácias parceiras)
+- [ ] Pagamento de verdade com Pix
+- [ ] Retirada confirmada pela própria farmácia, no balcão
+- [ ] Aplicativo para Android e IOS
 
 ## 💻 Pré-requisitos
 
