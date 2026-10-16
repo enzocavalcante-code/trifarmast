@@ -394,25 +394,15 @@ async function googleAuthDemo(mode){
 
 /* ---------------- login / cadastro ---------------- */
 
-/* Botão ocupado enquanto a conta carrega. Se demorar, explica que o servidor
-   gratuito está acordando — assim a espera não parece travamento. */
-async function withAuthButton(selector, busyLabel, task){
+/* Desliga o botão enquanto a conta carrega, para não enviar duas vezes.
+   O texto do botão não muda. */
+async function withAuthButton(selector, task){
   const button = document.querySelector(selector);
-  const original = button ? button.textContent : '';
-  let slowTimer = null;
-  if(button){
-    button.disabled = true;
-    button.innerHTML = `<span class="spinner"></span> ${busyLabel}`;
-    slowTimer = setTimeout(() => {
-      button.innerHTML = '<span class="spinner"></span> Acordando o servidor…';
-      showToast('Primeiro acesso do dia: o servidor gratuito leva alguns segundos para ligar.');
-    }, 3500);
-  }
+  if(button) button.disabled = true;
   try{
     return await task();
   }finally{
-    clearTimeout(slowTimer);
-    if(button){ button.disabled = false; button.textContent = original; }
+    if(button) button.disabled = false;
   }
 }
 
@@ -426,7 +416,7 @@ async function doLogin(){
     return;
   }
   try{
-    await withAuthButton('#view-login .btn-primary', 'Entrando…', async () => {
+    await withAuthButton('#view-login .btn-primary', async () => {
       await enterApp(await api.login(email, pass));
     });
   }catch(e){
@@ -441,7 +431,7 @@ async function doSignup(){
   const password = $('signup-pass').value;
   if(!name || !email || !password){ showToast('Preencha todos os campos.'); return; }
   try{
-    await withAuthButton('#view-signup .btn-primary', 'Criando sua conta…', async () => {
+    await withAuthButton('#view-signup .btn-primary', async () => {
       const session = await api.signup({ name, email, password });
       showToast('Conta criada! Bem-vindo(a) ao Trifarmas.');
       await enterApp(session);
