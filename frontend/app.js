@@ -782,7 +782,7 @@ const SCANNER_STATES = {
     button: '',
     caption: 'Se o navegador perguntar, toque em "Permitir".',
   },
-  live: { icon: '', text: '', button: '', caption: 'Deixe o nome do remédio dentro da moldura.' },
+  live: { icon: '', text: '', button: '', caption: 'Deixe o nome e a dosagem dentro da moldura.' },
 };
 
 function setScannerUI(stateName, custom = {}){
@@ -1231,8 +1231,9 @@ function collectOcrWords(data){
 // Separa o que dá para confiar. Sem confiança por palavra (leitor antigo),
 // trabalhamos com o texto inteiro, como antes.
 function readingQuality(reading){
-  // Vale palavra com duas letras ou mais e também número (a dosagem: "500").
-  const words = (reading.words || []).filter(w => /[a-zà-ú]{2,}/i.test(w.text) || /^\d+([.,]\d+)?$/.test(w.text));
+  // Vale tudo com dois caracteres de verdade: palavra ("mg"), número ("500")
+  // e as misturas que fazem parte do nome ("D3", "T4", "B12").
+  const words = (reading.words || []).filter(w => (String(w.text).match(/[a-z0-9à-ú]/gi) || []).length >= 2);
   const scored = words.filter(w => w.conf != null);
   const mean = scored.length ? scored.reduce((sum, w) => sum + w.conf, 0) / scored.length : null;
   // A melhor palavra vale mais que a média: numa caixa, o miolo da bula sai
@@ -1264,6 +1265,77 @@ function mergeDoseTokens(list){
     }
   });
   return out;
+}
+
+/* ---- dosagem: 500 mg é diferente de 1 g ----
+   Comparar texto não resolvia ("1g" e "1.000 mg" são a mesma coisa, "500mg" e
+   "500mg/ml" não são), então a dose vira número antes de comparar. */
+
+// Letras que o leitor troca por número quando está lendo uma dosagem ("SOO mg").
+const DIGIT_LOOKALIKE = { o: '0', q: '0', l: '1', i: '1', s: '5', b: '8', z: '2' };
+const UNIT_RE = /^(mg|mcg|ug|g|ui|ml)(?:\s*\/\s*(ml|g|dose))?[.,;:]?$/;
+
+// "SOO" → "500", mas só em pedaço curto que vai antes de uma unidade: assim
+// "paracetamol" nunca vira número.
+function doseNumber(raw, allowLetters){
+  const text = String(raw).toLowerCase();
+  if(!/\d/.test(text) && !(allowLetters && text.length <= 4)) return null;
+  const digits = text.replace(/[a-z]/g, c => DIGIT_LOOKALIKE[c] || 'x');
+  if(/x/.test(digits)) return null;
+  // "1.000" é mil; "0,21" é fração.
+  const normalized = digits.replace(/[.\s](?=\d{3}(\D|$))/g, '').replace(',', '.');
+  const value = parseFloat(normalized);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function pushDose(found, value, unit, per){
+  if(value == null) return;
+  if(per) found.push({ cls: `${unit}/${per}`, value });                   // concentração
+  else if(unit === 'g') found.push({ cls: 'mg', value: value * 1000 });
+  else if(unit === 'mg') found.push({ cls: 'mg', value });
+  else if(unit === 'mcg' || unit === 'ug') found.push({ cls: 'mg', value: value / 1000 });
+  else found.push({ cls: unit, value });                                  // ui, ml
+}
+
+/* Todas as dosagens de um texto, em miligramas quando dá para converter.
+   Trabalha palavra por palavra — "500 mg", "500mg", "1 g" e "SOO mg" caem
+   todas no mesmo número, e o que está no meio de uma palavra é ignorado. */
+function parseDoses(text){
+  const words = normalizeText(text)
+    .replace(/\bmiligramas?\b/g, 'mg').replace(/\bgramas?\b/g, 'g')
+    .replace(/\bmicrogramas?\b/g, 'mcg').replace(/\bmililitros?\b/g, 'ml')
+    .split(/\s+/).filter(Boolean);
+  const found = [];
+  for(let i = 0; i < words.length; i++){
+    const word = words[i];
+    // tudo junto: "500mg", "500mg/ml"
+    const glued = word.match(/^([0-9a-z.,]+?)(mg|mcg|ug|g|ui|ml)(?:\s*\/\s*(ml|g|dose))?[.,;:]?$/);
+    if(glued){
+      const value = doseNumber(glued[1], glued[1].length <= 4);
+      if(value != null){ pushDose(found, value, glued[2], glued[3]); continue; }
+    }
+    // separado: "500" + "mg"
+    const next = words[i + 1] && words[i + 1].match(UNIT_RE);
+    if(next){
+      const value = doseNumber(word, true);
+      if(value != null){ pushDose(found, value, next[1], next[2]); i++; }
+    }
+  }
+  return found;
+}
+
+const sameDose = (a, b) => a.cls === b.cls && Math.abs(a.value - b.value) <= Math.max(a.value, b.value) * 0.02;
+
+// A dosagem que o próprio catálogo declara (fica guardada no remédio).
+function medicineDoses(med){
+  if(!med.__doses) med.__doses = parseDoses(`${med.name} ${med.presentation || ''}`);
+  return med.__doses;
+}
+
+// Quantidade da caixa: "20 comprimidos", "30 cápsulas", "1 unidade".
+function packSize(text){
+  const match = normalizeText(text).match(/(\d{1,3})\s*(comprimid|capsul|drage|envelope|sache|unidade|adesivo|ampola)/);
+  return match ? Number(match[1]) : null;
 }
 
 /* Palavras do catálogo que também são palavras do dia a dia (ou termos
@@ -1305,24 +1377,35 @@ function tokenInText(token, textTokens){
 /* Procura no catálogo o remédio que combina com a leitura. Para um remédio ser
    aceito não basta uma palavra parecida: ou duas partes do nome batem, ou a
    palavra que bateu é específica daquele remédio (nada de "teste", "água"). */
-function scoreMedicine(med, words){
+function scoreMedicine(med, words, readDoses = [], readPack = null, readText = ''){
   const nameTokens = [...new Set(ocrTokens(med.name))];
   const ingredientTokens = [...new Set(ocrTokens(med.ingredient || ''))];
   const wordTokens = nameTokens.filter(t => !/\d/.test(t) && t.length >= 4);
   // "pistas" conta palavras diferentes: o nome e o princípio ativo repetidos
   // ("Dipirona" / "Dipirona sódica") somam pontos, mas valem como uma pista só.
   const matched = new Set(), strongTokens = new Set();
-  let score = 0, nameHits = 0, doseHit = false;
+  let score = 0, nameHits = 0;
 
   for(const token of nameTokens){
-    if(token.length < 4) continue;
+    if(/^\d/.test(token)) continue;                          // dosagem é comparada por número
+    // "D3", "T4", "B12" são curtas mas fazem parte do nome: valem como apoio.
+    const short = token.length < 4;
+    if(short && !(token.length >= 2 && /\d/.test(token))) continue;
     const hit = tokenHit(token, words);
     if(!hit) continue;
-    if(/\d/.test(token)){ doseHit = true; continue; }        // dosagem só soma com o nome
     nameHits++;
     matched.add(token);
+    if(short){ score += hit.kind === 'exact' ? 2 : 0; continue; }
     score += hit.kind === 'exact' ? 4 : 2;
     if(hit.kind === 'exact' && token.length >= 5 && !WEAK_TOKENS.has(token)) strongTokens.add(token);
+  }
+
+  // O nome inteiro aparece escrito ("complexo b", "teste de gravidez").
+  const phrase = normalizeText(med.name).replace(/\s*\d.*$/, '').trim();
+  if(phrase.length >= 6 && phrase.includes(' ') && readText.includes(phrase)){
+    matched.add(`frase:${phrase}`);
+    strongTokens.add(`frase:${phrase}`);
+    score += 5;
   }
   for(const token of ingredientTokens){
     if(token.length < 6) continue;
@@ -1332,15 +1415,29 @@ function scoreMedicine(med, words){
     score += hit.kind === 'exact' ? 3 : 1;
     if(hit.kind === 'exact' && !WEAK_TOKENS.has(token)) strongTokens.add(token);
   }
-  if(doseHit && matched.size) score += 2;
+  /* A dosagem decide entre as apresentações: "Dipirona 1g" e "Dipirona Sódica
+     500mg" têm o mesmo nome, então quem bate a dose sobe e quem contraria a
+     dose cai. Só compara o que é comparável (mg com mg, UI com UI). */
+  const medDoses = medicineDoses(med);
+  const classes = new Set(medDoses.map(d => d.cls));
+  const comparable = readDoses.filter(r => classes.has(r.cls));
+  const doseMatch = comparable.some(r => medDoses.some(d => sameDose(d, r)));
+  const doseConflict = comparable.length > 0 && !doseMatch;
+  if(matched.size){
+    if(doseMatch) score += 4;
+    else if(doseConflict) score -= 4;
+  }
+  // "20 comprimidos" na caixa conferindo com a apresentação ajuda um pouco.
+  if(matched.size && readPack && packSize(med.presentation || '') === readPack) score += 2;
 
   const hits = matched.size, strong = strongTokens.size;
   // O nome do remédio é uma palavra só ("Dorflex", "Yasmin") e ela foi lida inteira.
   const wholeName = wordTokens.length === 1 && nameHits === 1 && strong > 0;
   const ok = hits > 0 && (hits >= 2 || strong > 0) && score >= 4;
-  // Confiante = duas pistas diferentes, a dosagem junto, ou o nome inteiro.
-  const sure = ok && strong > 0 && (hits >= 2 || doseHit || wholeName);
-  return { med, score, hits, strong, sure, ok };
+  // Confiante = duas pistas diferentes, a dosagem junto, ou o nome inteiro —
+  // e nunca quando a dosagem lida briga com a do remédio.
+  const sure = ok && strong > 0 && !doseConflict && (hits >= 2 || doseMatch || wholeName);
+  return { med, score, hits, strong, sure, ok, doseMatch, doseConflict };
 }
 
 function matchMedicines(input){
@@ -1348,10 +1445,22 @@ function matchMedicines(input){
     ? ocrTokens(input).map(token => ({ token, conf: null }))
     : scanWords(input);
   if(!words.length) return [];
+  // A dosagem é lida do texto confiável, com "500" e "mg" ainda separados.
+  const readText = typeof input === 'string' ? input : scanText(input);
+  const readDoses = parseDoses(readText);
+  const readPack = packSize(readText);
+  const flat = normalizeText(readText).replace(/\s+/g, ' ');
   return state.catalog.medicines
-    .map(med => scoreMedicine(med, words))
+    .map(med => scoreMedicine(med, words, readDoses, readPack, flat))
     .filter(r => r.ok)
     .sort((a, b) => b.score - a.score || a.med.name.localeCompare(b.med.name));
+}
+
+// O texto só com as palavras em que dá para confiar.
+function scanText(reading){
+  const quality = readingQuality(reading);
+  const list = quality.reliable.length ? quality.reliable : quality.words;
+  return list.length ? list.map(w => w.text).join(' ') : String(reading.text || '');
 }
 
 /* ---- caixa de remédio ou papel escrito? ----
@@ -1464,7 +1573,9 @@ function handleScannedText(input){
     const tied = matches.filter(m => m.score >= best.score - 1);
     const shared = mainNameToken(best.med);
     if(!clear && shared && tied.every(m => mainNameToken(m.med) === shared)){
-      showScannedTerm(shared, tied.map(m => m.med), source);
+      // Sem a dosagem na foto, o app não tem como escolher entre 500mg e 1g.
+      const doseRead = matches.some(m => m.doseMatch || m.doseConflict);
+      showScannedTerm(shared, tied.map(m => m.med), source, doseRead);
       return;
     }
     // Leu pouco (uma pista só): pergunta antes de abrir a compra.
@@ -1542,7 +1653,7 @@ function medSheetLine(med){
 }
 
 // Resultado da leitura, numa folha branca sobre a câmera.
-function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body = '', price = null, buttons = [], footer = '' }){
+function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body = '', price = null, note = '', buttons = [], footer = '' }){
   const box = $('scan-outcome');
   if(!box) return;
   box.className = `scan-sheet ${tone}`;
@@ -1555,6 +1666,7 @@ function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body =
       </div>
       ${price != null ? priceTagHtml(price) : ''}
     </div>
+    ${note ? `<p class="ss-note">${escapeHtml(note)}</p>` : ''}
     <div class="ss-actions">
       ${buttons.map(b => `<button class="${b.primary ? 'btn btn-primary' : 'btn btn-ghost'}" onclick="${b.onClick}">${escapeHtml(b.label)}</button>`).join('')}
     </div>
@@ -1593,7 +1705,7 @@ function showUncertainMedicine(med, text, source = 'texto'){
 }
 
 // Vários tamanhos do mesmo remédio: abre a busca com todos.
-function showScannedTerm(term, meds, source = 'caixa'){
+function showScannedTerm(term, meds, source = 'caixa', doseRead = true){
   // A etiqueta mostra o mesmo preço que vai aparecer no topo da pesquisa, e a
   // linha conta quantas apresentações e farmácias a pesquisa realmente tem.
   const preview = searchPreview(term);
@@ -1608,6 +1720,7 @@ function showScannedTerm(term, meds, source = 'caixa'){
       preview.pharmacies ? `em ${countLabel(preview.pharmacies, 'farmácia', 'farmácias')}` : '',
     ].filter(Boolean).join(' · '),
     price: cheapest,
+    note: doseRead ? '' : 'Não consegui ler a dosagem — escolha a sua na próxima tela.',
     buttons: [{ label: 'Ver os preços', primary: true, onClick: `searchForTerm('${term.replace(/'/g, "\\'")}')` }],
     footer: 'Não é este remédio? <button class="link-btn" onclick="captureAndRead()">Ler de novo</button>',
   });
