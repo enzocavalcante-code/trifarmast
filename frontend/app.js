@@ -443,6 +443,7 @@ async function doSignup(){
 
 function doLogout(){
   api.setToken(null);
+  if(ocrWorker){ try{ ocrWorker.terminate(); }catch{ /* já encerrado */ } ocrWorker = null; ocrWorkerPromise = null; }
   stopOrderTimers();
   if(typeof stopRefining === 'function') stopRefining();
   loc.manualAddress = false;
@@ -905,6 +906,7 @@ async function cameraAlreadyAllowed(){
 }
 
 function stopScannerStream(){
+  hideScanProgress();
   clearTimeout(scannerTimer);
   scannerStarting = false;
   if(scannerStream){
@@ -945,18 +947,326 @@ function buildScannerMockList(){
     `<button class="chip" onclick="scanResult('${m.id}')">${escapeHtml(m.name)}</button>`
   ).join('');
 }
-function mockCapture(){
-  const meds = state.catalog.medicines;
-  if(meds.length===0){ showToast('O catálogo ainda está carregando. Tente em instantes.'); return; }
-  scanResult(meds[Math.floor(Math.random()*meds.length)].id);
-}
+
 function scanResult(medId){
   const med = state.catalog.medicines.find(m=>m.id===medId);
+  if(!med) return;
   showToast(`Identificado: ${med.name}`);
-  $('search-input').value = med.name;
+  searchForTerm(med.name);
+}
+
+// Leva para a tela de compra com o remédio já pesquisado (preços por farmácia,
+// ordenados pela distância de onde a pessoa está).
+function searchForTerm(term){
+  $('search-input').value = term;
   state.activeCat = 'Todos';
+  state.resultsLimit = RESULTS_PAGE_SIZE;
   buildChips();
   switchTab('home');
+  renderResults();
+  setTimeout(()=>{
+    const results = $('results-wrap');
+    if(results) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 120);
+}
+
+/* ---------------- ler o texto da caixa (OCR) ----------------
+   A câmera tira uma foto do que está na frente dela, o Tesseract lê as letras
+   e o app procura esse texto no catálogo. Funciona com a caixa do remédio, a
+   receita ou um papel escrito à mão em letra de forma. */
+
+const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+let ocrWorker = null;
+let ocrWorkerPromise = null;
+let ocrRunning = false;
+
+function loadScript(src){
+  return new Promise((resolve, reject)=>{
+    const tag = document.createElement('script');
+    tag.src = src;
+    tag.async = true;
+    tag.onload = resolve;
+    tag.onerror = () => reject(new Error('falha ao baixar o leitor de texto'));
+    document.head.appendChild(tag);
+  });
+}
+
+// O leitor é baixado na primeira leitura (~2 MB) e fica pronto para as próximas.
+async function getOcrWorker(onProgress){
+  if(ocrWorker) return ocrWorker;
+  if(ocrWorkerPromise) return ocrWorkerPromise;
+  ocrWorkerPromise = (async () => {
+    if(typeof Tesseract === 'undefined') await loadScript(TESSERACT_URL);
+    const worker = await Tesseract.createWorker('por', 1, {
+      logger: m => {
+        if(m.status === 'recognizing text') onProgress(0.4 + m.progress * 0.6, 'Lendo o que está escrito…');
+        else onProgress(Math.min(0.35, (m.progress || 0) * 0.35), 'Preparando o leitor…');
+      },
+    });
+    ocrWorker = worker;
+    return worker;
+  })();
+  try{
+    return await ocrWorkerPromise;
+  }catch(error){
+    ocrWorkerPromise = null;
+    throw error;
+  }
+}
+
+// Foto do que a câmera está vendo, em tons de cinza e com contraste reforçado
+// (a leitura fica bem melhor do que na imagem crua).
+function grabCameraFrame(){
+  const video = $('scanner-video');
+  if(!video || !video.videoWidth) return null;
+  const maxWidth = 1400;
+  const scale = Math.min(1, maxWidth / video.videoWidth);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = image.data;
+  for(let i = 0; i < data.length; i += 4){
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const boosted = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
+    data[i] = data[i + 1] = data[i + 2] = boosted;
+  }
+  ctx.putImageData(image, 0, 0);
+  return canvas;
+}
+
+function setScanProgress(fraction, text){
+  const overlay = $('scan-progress');
+  if(!overlay) return;
+  overlay.classList.remove('hidden');
+  $('scan-progress-text').textContent = text;
+  $('scan-progress-bar').style.width = `${Math.round(Math.max(0.04, fraction) * 100)}%`;
+}
+
+function hideScanProgress(){
+  const overlay = $('scan-progress');
+  if(overlay) overlay.classList.add('hidden');
+}
+
+/* Botão "Ler o remédio": tira a foto, lê o texto e abre a tela de compra. */
+async function captureAndRead(){
+  if(ocrRunning) return;
+  if(!state.catalog.medicines.length){ showToast('O catálogo ainda está carregando. Tente em instantes.'); return; }
+
+  const canvas = grabCameraFrame();
+  if(!canvas){
+    showToast('Ligue a câmera (ou envie uma foto) para eu ler o nome do remédio.');
+    return;
+  }
+  await readImage(canvas);
+}
+
+/* Mesma leitura, a partir de uma foto escolhida no aparelho. */
+async function readPhoto(input){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file) return;
+  if(!/^image\//.test(file.type)){ showToast('Escolha uma foto da caixa do remédio.'); return; }
+  const url = URL.createObjectURL(file);
+  try{
+    const image = await new Promise((resolve, reject)=>{
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('não consegui abrir a foto'));
+      img.src = url;
+    });
+    await readImage(image);
+  }catch(e){
+    showToast(e.message);
+  }finally{
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function readImage(source){
+  ocrRunning = true;
+  hideScanOutcome();
+  setScanProgress(0.05, 'Preparando o leitor…');
+  try{
+    const worker = await getOcrWorker(setScanProgress);
+    const result = await worker.recognize(source);
+    const text = (result && result.data && result.data.text) || '';
+    hideScanProgress();
+    handleScannedText(text);
+  }catch(error){
+    hideScanProgress();
+    showScanReadError(error);
+  }finally{
+    ocrRunning = false;
+  }
+}
+
+function showScanReadError(error){
+  const offline = /baixar|network|fetch|load/i.test(error && error.message || '');
+  showScanOutcome({
+    tone: 'warn',
+    title: offline ? 'Não consegui baixar o leitor de texto' : 'Não consegui ler agora',
+    body: offline
+      ? 'A leitura precisa de internet na primeira vez. Verifique a conexão e tente de novo — ou escolha o remédio na lista abaixo.'
+      : 'Tente de novo com a caixa mais perto e com boa luz, ou escolha o remédio na lista abaixo.',
+    buttons: [{ label: 'Tentar de novo', primary: true, onClick: 'captureAndRead()' }],
+  });
+}
+
+/* ---- do texto lido para o remédio do catálogo ---- */
+
+// Distância de edição, para aguentar erro de leitura ("D1PIRONA" → "dipirona").
+function editDistance(a, b){
+  if(a === b) return 0;
+  if(Math.abs(a.length - b.length) > 2) return 99;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for(let i = 1; i <= a.length; i++){
+    let last = prev[0];
+    prev[0] = i;
+    for(let j = 1; j <= b.length; j++){
+      const current = prev[j];
+      prev[j] = Math.min(
+        prev[j] + 1,
+        prev[j - 1] + 1,
+        last + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+      last = current;
+    }
+  }
+  return prev[b.length];
+}
+
+const ocrTokens = text => normalizeText(text)
+  .replace(/(\d)\s*(mg|ml|g|mcg)\b/g, '$1$2')     // "500 mg" → "500mg"
+  .split(/[^a-z0-9]+/)
+  .filter(Boolean);
+
+// Uma palavra do remédio aparece no texto lido? (aceita pequeno erro de leitura)
+function tokenInText(token, textTokens){
+  if(textTokens.includes(token)) return true;
+  if(token.length < 5) return false;
+  const limit = token.length >= 8 ? 2 : 1;
+  return textTokens.some(word => Math.abs(word.length - token.length) <= limit && editDistance(word, token) <= limit);
+}
+
+// Procura no catálogo o remédio que melhor combina com o texto lido.
+function matchMedicines(text){
+  const textTokens = ocrTokens(text);
+  if(!textTokens.length) return [];
+  return state.catalog.medicines.map(med => {
+    const nameTokens = ocrTokens(med.name);
+    const ingredientTokens = ocrTokens(med.ingredient || '');
+    let score = 0;
+    let nameHit = false;
+    for(const token of nameTokens){
+      if(token.length < 4) continue;                       // "500mg" entra abaixo
+      if(tokenInText(token, textTokens)){
+        score += /\d/.test(token) ? 2 : 3;                 // nome vale mais que dosagem
+        if(!/\d/.test(token)) nameHit = true;
+      }
+    }
+    for(const token of ingredientTokens){
+      if(token.length >= 5 && tokenInText(token, textTokens)){
+        score += 2;
+        nameHit = true;
+      }
+    }
+    return { med, score, nameHit };
+  })
+  .filter(r => r.nameHit && r.score >= 3)
+  .sort((a, b) => b.score - a.score || a.med.name.localeCompare(b.med.name));
+}
+
+// Primeira palavra do nome ("Dipirona Sódica 500mg" → "dipirona"): serve para
+// saber se dois resultados são o mesmo remédio em apresentações diferentes.
+function mainNameToken(med){
+  return ocrTokens(med.name).find(token => token.length >= 4 && !/\d/.test(token)) || '';
+}
+
+// Palavra mais provável de ser o nome do remédio, quando não achamos no catálogo.
+function bestGuessTerm(text){
+  const words = ocrTokens(text).filter(w => /^[a-z]{5,}$/.test(w));
+  const ignore = ['comprimidos', 'revestidos', 'capsulas', 'generico', 'medicamento', 'similar',
+                  'farmacia', 'drogaria', 'contem', 'oral', 'adulto', 'infantil', 'uso', 'via'];
+  const useful = words.filter(w => !ignore.includes(w));
+  return (useful.sort((a, b) => b.length - a.length)[0] || '').trim();
+}
+
+function handleScannedText(text){
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if(clean.length < 3){
+    showScanOutcome({
+      tone: 'warn',
+      title: 'Não achei nenhuma palavra',
+      body: 'Aproxime a caixa, deixe o nome dentro da moldura e evite sombra na embalagem.',
+      buttons: [{ label: 'Tentar de novo', primary: true, onClick: 'captureAndRead()' }],
+    });
+    return;
+  }
+
+  const matches = matchMedicines(clean);
+  if(matches.length){
+    const best = matches[0];
+    // Achou com folga: já abre a tela de compra desse remédio.
+    if(matches.length === 1 || best.score >= matches[1].score + 2){
+      scanResult(best.med.id);
+      return;
+    }
+    // Empate entre apresentações do mesmo remédio (500mg, 750mg, gotas…):
+    // abre a busca pelo nome, que já lista todas com os preços.
+    const tied = matches.filter(m => m.score >= best.score - 1);
+    const shared = mainNameToken(best.med);
+    if(shared && tied.every(m => mainNameToken(m.med) === shared)){
+      showToast(`Identificado: ${shared}`);
+      searchForTerm(shared);
+      return;
+    }
+    // Remédios diferentes no mesmo papel: deixa a pessoa escolher.
+    showScanOutcome({
+      tone: 'ok',
+      title: `Li “${escapeHtml(clean.slice(0, 60))}”`,
+      body: 'Qual destes é o seu remédio?',
+      buttons: matches.slice(0, 3).map((m, i) => ({
+        label: m.med.name, primary: i === 0, onClick: `scanResult('${m.med.id}')`,
+      })),
+    });
+    return;
+  }
+
+  const guess = bestGuessTerm(clean);
+  showScanOutcome({
+    tone: 'warn',
+    title: `Li “${escapeHtml(clean.slice(0, 60))}”`,
+    body: guess
+      ? 'Esse remédio não está no nosso catálogo, mas você pode procurar assim mesmo.'
+      : 'Não reconheci nenhum remédio nesse texto. Tente de novo mais perto da caixa.',
+    buttons: [
+      ...(guess ? [{ label: `Procurar “${guess}”`, primary: true, onClick: `searchForTerm('${guess.replace(/'/g, "\\'")}')` }] : []),
+      { label: 'Tentar de novo', primary: !guess, onClick: 'captureAndRead()' },
+    ],
+  });
+}
+
+// Resultado da leitura, logo abaixo da câmera.
+function showScanOutcome({ tone, title, body, buttons }){
+  const box = $('scan-outcome');
+  if(!box) return;
+  box.className = `scan-outcome ${tone}`;
+  box.innerHTML = `
+    <b>${title}</b>
+    <p>${body}</p>
+    <div class="scan-outcome-actions">
+      ${buttons.map(b => `<button class="${b.primary ? 'btn btn-primary' : 'btn-outline-sm'}" onclick="${b.onClick}">${escapeHtml(b.label)}</button>`).join('')}
+    </div>`;
+  box.classList.remove('hidden');
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function hideScanOutcome(){
+  const box = $('scan-outcome');
+  if(box){ box.classList.add('hidden'); box.innerHTML = ''; }
 }
 
 /* ---------------- calendário / lembretes ---------------- */

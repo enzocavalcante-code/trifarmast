@@ -150,7 +150,7 @@
 
       <!-- ---- SCANNER ---- -->
       <section id="tab-scanner" class="hidden">
-        <div class="section-head"><h2>Escanear remédio</h2><p>Aponte a câmera para a caixa ou o código de barras.</p></div>
+        <div class="section-head"><h2>Escanear remédio</h2><p>Aponte a câmera para o nome escrito na caixa (ou na receita) e toque em <b>Ler o remédio</b>.</p></div>
         <div class="scanner-frame" id="scanner-frame">
           <video id="scanner-video" autoplay playsinline muted></video>
           <div class="scan-guide" id="scan-guide">
@@ -164,14 +164,23 @@
             <p id="scan-overlay-text">Toque em “Ligar a câmera” para começar.</p>
             <button class="btn btn-primary" id="scan-overlay-btn" onclick="startScanner(true)">Ligar a câmera</button>
           </div>
+          <!-- Progresso da leitura do texto -->
+          <div class="scan-progress hidden" id="scan-progress">
+            <p id="scan-progress-text">Lendo o que está escrito…</p>
+            <div class="scan-progress-track"><i id="scan-progress-bar"></i></div>
+          </div>
         </div>
         <p class="scanner-caption" id="scanner-status">A câmera só liga quando você pedir.</p>
         <div class="scanner-actions">
-          <button class="btn btn-primary" onclick="mockCapture()">Capturar agora</button>
+          <button class="btn btn-primary" onclick="captureAndRead()">Ler o remédio</button>
+          <label class="btn btn-ghost" style="cursor:pointer;">Enviar foto
+            <input type="file" accept="image/*" capture="environment" class="hidden" onchange="readPhoto(this)">
+          </label>
           <button class="btn btn-ghost" id="scanner-stop" onclick="stopScanner(true)" hidden>Desligar câmera</button>
         </div>
+        <div class="scan-outcome hidden" id="scan-outcome"></div>
         <div class="scanner-fallback">
-          <strong class="small-title">Sem câmera? Toque em um remédio:</strong>
+          <strong class="small-title">Prefere escolher na lista?</strong>
           <div class="mock-list" id="scanner-mock-list"></div>
         </div>
       </section>

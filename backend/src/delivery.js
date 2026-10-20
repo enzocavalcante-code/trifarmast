@@ -1,18 +1,24 @@
 // Regras da entrega por motoboy (fonte única para o servidor).
 //  - A taxa é calculada aqui, nunca vem do navegador.
-//  - A distância é a informada pelo app (localização do usuário até a loja);
-//    acima do limite o pedido só pode ser retirado na farmácia.
+//  - A distância é medida entre o endereço informado pela pessoa e a farmácia;
+//    sem endereço não existe taxa.
 //  - Entregador, placa e tempos são simulados: não há motoboy de verdade.
+//
+// Preço: o mercado de delivery no Brasil cobra por faixa de distância —
+// cerca de R$ 5 até 2 km, R$ 8 de 3 a 5 km e R$ 12 de 6 a 8 km
+// (https://saipos.com/sistema/delivery/como-calcular-frete-delivery).
+// A conta abaixo reproduz essa tabela: base até 2 km + valor por km rodado.
 
 const MAX_DELIVERY_KM = 15;
+const BASE_FEE = 5.00;     // taxa mínima, já cobre os 2 primeiros km
+const BASE_KM = 2;
+const FEE_PER_KM = 1.50;   // por km iniciado acima dos 2 km
 
-// Faixas de distância: até X km, taxa e prazo prometido ao cliente.
-const BANDS = [
-  { maxKm: 2,              fee: 6.90,  minutes: 25 },
-  { maxKm: 5,              fee: 9.90,  minutes: 35 },
-  { maxKm: 10,             fee: 12.90, minutes: 45 },
-  { maxKm: MAX_DELIVERY_KM, fee: 15.90, minutes: 60 },
-];
+// Tempo prometido: preparo + trajeto (~20 km/h no trânsito urbano).
+const PREP_MINUTES = 12;
+const MINUTES_PER_KM = 3;
+const MIN_MINUTES = 20;
+const MAX_MINUTES = 60;
 
 // Simulação acelerada: o trajeto do motoboy dura estes segundos na tela,
 // representando os "minutes" prometidos acima.
@@ -53,14 +59,22 @@ function parseDistanceKm(value) {
   return Math.round(km * 100) / 100;
 }
 
-// Taxa e prazo da entrega. Lança erro de distância para fora da área.
+// Taxa e prazo da entrega. Lança "fora da área" acima do limite atendido.
 function quoteDelivery(rawKm) {
   const km = parseDistanceKm(rawKm);
   if (km === null) return null;
   if (km > MAX_DELIVERY_KM) return { outOfRange: true, km };
-  const band = BANDS.find(b => km <= b.maxKm) || BANDS[BANDS.length - 1];
-  return { km, fee: band.fee, minutes: band.minutes, outOfRange: false };
+  const extraKm = Math.max(0, Math.ceil(km - BASE_KM));   // por km iniciado
+  const fee = Math.round((BASE_FEE + extraKm * FEE_PER_KM) * 100) / 100;
+  const minutes = Math.min(MAX_MINUTES, Math.max(MIN_MINUTES, Math.round(PREP_MINUTES + km * MINUTES_PER_KM)));
+  return { km, fee, minutes, extraKm, baseFee: BASE_FEE, baseKm: BASE_KM, perKm: FEE_PER_KM, outOfRange: false };
 }
+
+// Tabela enviada ao app, para ele mostrar a mesma conta do servidor.
+const priceTable = () => ({
+  maxKm: MAX_DELIVERY_KM, baseFee: BASE_FEE, baseKm: BASE_KM, perKm: FEE_PER_KM,
+  prepMinutes: PREP_MINUTES, minutesPerKm: MINUTES_PER_KM, minMinutes: MIN_MINUTES, maxMinutes: MAX_MINUTES,
+});
 
 // Horários da simulação, a partir do momento em que o pedido entra em preparação.
 function deliverySchedule(baseMs) {
@@ -72,6 +86,6 @@ function deliverySchedule(baseMs) {
 }
 
 module.exports = {
-  MAX_DELIVERY_KM, BANDS, PREPARING_MS, DISPATCH_MS, RIDE_MS,
-  quoteDelivery, parseDistanceKm, randomCourier, deliverySchedule,
+  MAX_DELIVERY_KM, BASE_FEE, BASE_KM, FEE_PER_KM, PREPARING_MS, DISPATCH_MS, RIDE_MS,
+  quoteDelivery, parseDistanceKm, randomCourier, deliverySchedule, priceTable,
 };
