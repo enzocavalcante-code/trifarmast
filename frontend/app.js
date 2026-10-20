@@ -768,7 +768,7 @@ const SCANNER_STATES = {
     icon: ICON_CAMERA,
     text: 'A câmera fica desligada até você pedir.',
     button: 'Ligar a câmera',
-    caption: 'Sem câmera? Escolha um remédio na lista abaixo.',
+    caption: 'A câmera só liga quando você pedir.',
   },
   loading: {
     icon: ICON_CAMERA,
@@ -776,7 +776,7 @@ const SCANNER_STATES = {
     button: '',
     caption: 'Se o navegador perguntar, toque em "Permitir".',
   },
-  live: { icon: '', text: '', button: '', caption: 'Aponte para o código de barras ou a caixa do remédio.' },
+  live: { icon: '', text: '', button: '', caption: 'Deixe o nome do remédio dentro da moldura.' },
 };
 
 function setScannerUI(stateName, custom = {}){
@@ -1107,11 +1107,12 @@ function showScanReadError(error){
   const offline = /baixar|network|fetch|load/i.test(error && error.message || '');
   showScanOutcome({
     tone: 'warn',
-    title: offline ? 'Não consegui baixar o leitor de texto' : 'Não consegui ler agora',
+    eyebrow: 'Não deu para ler',
+    title: offline ? 'Sem internet para o leitor' : 'Não consegui ler agora',
     body: offline
-      ? 'A leitura precisa de internet na primeira vez. Verifique a conexão e tente de novo — ou escolha o remédio na lista abaixo.'
-      : 'Tente de novo com a caixa mais perto e com boa luz, ou escolha o remédio na lista abaixo.',
-    buttons: [{ label: 'Tentar de novo', primary: true, onClick: 'captureAndRead()' }],
+      ? 'A leitura precisa de internet na primeira vez. Verifique a conexão ou escolha o remédio na lista.'
+      : 'Tente de novo com a caixa mais perto e com boa luz.',
+    buttons: [{ label: 'Ler de novo', primary: true, onClick: 'captureAndRead()' }],
   });
 }
 
@@ -1199,9 +1200,10 @@ function handleScannedText(text){
   if(clean.length < 3){
     showScanOutcome({
       tone: 'warn',
+      eyebrow: 'Não deu para ler',
       title: 'Não achei nenhuma palavra',
       body: 'Aproxime a caixa, deixe o nome dentro da moldura e evite sombra na embalagem.',
-      buttons: [{ label: 'Tentar de novo', primary: true, onClick: 'captureAndRead()' }],
+      buttons: [{ label: 'Ler de novo', primary: true, onClick: 'captureAndRead()' }],
     });
     return;
   }
@@ -1209,28 +1211,27 @@ function handleScannedText(text){
   const matches = matchMedicines(clean);
   if(matches.length){
     const best = matches[0];
-    // Achou com folga: já abre a tela de compra desse remédio.
+    // Achou com folga: mostra o remédio e o menor preço para confirmar.
     if(matches.length === 1 || best.score >= matches[1].score + 2){
-      scanResult(best.med.id);
+      showScannedMedicine(best.med);
       return;
     }
-    // Empate entre apresentações do mesmo remédio (500mg, 750mg, gotas…):
-    // abre a busca pelo nome, que já lista todas com os preços.
+    // Empate entre apresentações do mesmo remédio (500mg, 750mg, gotas…).
     const tied = matches.filter(m => m.score >= best.score - 1);
     const shared = mainNameToken(best.med);
     if(shared && tied.every(m => mainNameToken(m.med) === shared)){
-      showToast(`Identificado: ${shared}`);
-      searchForTerm(shared);
+      showScannedTerm(shared, tied.map(m => m.med));
       return;
     }
     // Remédios diferentes no mesmo papel: deixa a pessoa escolher.
     showScanOutcome({
-      tone: 'ok',
-      title: `Li “${escapeHtml(clean.slice(0, 60))}”`,
-      body: 'Qual destes é o seu remédio?',
+      eyebrow: 'Mais de um remédio no texto',
+      title: 'Qual destes é o seu?',
+      body: escapeHtml(`Li “${clean.slice(0, 60)}”`),
       buttons: matches.slice(0, 3).map((m, i) => ({
         label: m.med.name, primary: i === 0, onClick: `scanResult('${m.med.id}')`,
       })),
+      footer: '<button class="link-btn" onclick="captureAndRead()">Ler de novo</button>',
     });
     return;
   }
@@ -1238,30 +1239,89 @@ function handleScannedText(text){
   const guess = bestGuessTerm(clean);
   showScanOutcome({
     tone: 'warn',
-    title: `Li “${escapeHtml(clean.slice(0, 60))}”`,
+    eyebrow: 'Lido na caixa',
+    title: escapeHtml(clean.slice(0, 60)),
     body: guess
-      ? 'Esse remédio não está no nosso catálogo, mas você pode procurar assim mesmo.'
-      : 'Não reconheci nenhum remédio nesse texto. Tente de novo mais perto da caixa.',
+      ? 'Este remédio não está no nosso catálogo, mas você pode procurar assim mesmo.'
+      : 'Não reconheci nenhum remédio nesse texto.',
     buttons: [
       ...(guess ? [{ label: `Procurar “${guess}”`, primary: true, onClick: `searchForTerm('${guess.replace(/'/g, "\\'")}')` }] : []),
-      { label: 'Tentar de novo', primary: !guess, onClick: 'captureAndRead()' },
+      { label: 'Ler de novo', primary: !guess, onClick: 'captureAndRead()' },
     ],
   });
 }
 
-// Resultado da leitura, logo abaixo da câmera.
-function showScanOutcome({ tone, title, body, buttons }){
+/* Folha de resultado: sobe por cima da câmera com o que foi lido, o menor
+   preço e o caminho para a tela de compra. */
+
+// Menor preço e em quantas farmácias o remédio tem preço.
+function medPriceSummary(med){
+  const prices = Object.values(med.prices || {}).filter(p => p != null);
+  return {
+    cheapest: prices.length ? Math.min(...prices) : null,
+    pharmacies: prices.length,
+  };
+}
+
+function priceTagHtml(value){
+  if(value == null) return '';
+  const [reais, centavos] = formatBRL(value).replace(/^R\$\s*/, '').split(',');
+  return `<span class="price-tag"><span class="pt-cur">R$</span><span class="pt-val">${reais},${centavos}</span></span>`;
+}
+
+function medSheetLine(med){
+  const { pharmacies } = medPriceSummary(med);
+  return [med.presentation, pharmacies ? `em ${pharmacies} ${pharmacies === 1 ? 'farmácia' : 'farmácias'}` : '']
+    .filter(Boolean).join(' ');
+}
+
+// Resultado da leitura, numa folha branca sobre a câmera.
+function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body = '', price = null, buttons = [], footer = '' }){
   const box = $('scan-outcome');
   if(!box) return;
-  box.className = `scan-outcome ${tone}`;
+  box.className = `scan-sheet ${tone}`;
   box.innerHTML = `
-    <b>${title}</b>
-    <p>${body}</p>
-    <div class="scan-outcome-actions">
-      ${buttons.map(b => `<button class="${b.primary ? 'btn btn-primary' : 'btn-outline-sm'}" onclick="${b.onClick}">${escapeHtml(b.label)}</button>`).join('')}
-    </div>`;
+    <div class="ss-read"><i></i> ${escapeHtml(eyebrow)}</div>
+    <div class="ss-top">
+      <div class="ss-title">
+        <h3>${title}</h3>
+        ${body ? `<p>${body}</p>` : ''}
+      </div>
+      ${price != null ? priceTagHtml(price) : ''}
+    </div>
+    <div class="ss-actions">
+      ${buttons.map(b => `<button class="${b.primary ? 'btn btn-primary' : 'btn btn-ghost'}" onclick="${b.onClick}">${escapeHtml(b.label)}</button>`).join('')}
+    </div>
+    ${footer ? `<p class="ss-foot">${footer}</p>` : ''}`;
   box.classList.remove('hidden');
-  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Remédio reconhecido: mostra o menor preço e leva para a comparação.
+function showScannedMedicine(med){
+  const { cheapest } = medPriceSummary(med);
+  showScanOutcome({
+    title: escapeHtml(med.name),
+    body: escapeHtml(medSheetLine(med)),
+    price: cheapest,
+    buttons: [{ label: 'Ver os preços', primary: true, onClick: `scanResult('${med.id}')` }],
+    footer: 'Não é este remédio? <button class="link-btn" onclick="captureAndRead()">Ler de novo</button>',
+  });
+}
+
+// Vários tamanhos do mesmo remédio: abre a busca com todos.
+function showScannedTerm(term, meds){
+  const cheapest = meds
+    .map(m => medPriceSummary(m).cheapest)
+    .filter(p => p != null)
+    .sort((a, b) => a - b)[0];
+  const name = term.charAt(0).toUpperCase() + term.slice(1);
+  showScanOutcome({
+    title: escapeHtml(name),
+    body: `${meds.length} apresentações encontradas`,
+    price: cheapest,
+    buttons: [{ label: 'Ver os preços', primary: true, onClick: `searchForTerm('${term.replace(/'/g, "\\'")}')` }],
+    footer: 'Não é este remédio? <button class="link-btn" onclick="captureAndRead()">Ler de novo</button>',
+  });
 }
 
 function hideScanOutcome(){
