@@ -142,7 +142,6 @@
         <div class="map-legend">
           <span><i class="legend-dot" style="background:#2b7de1"></i> Você</span>
           <span><i class="legend-dot" style="background:var(--green-600)"></i> Farmácias</span>
-          <span><i class="legend-dot" style="background:var(--gold)"></i> Redes parceiras</span>
         </div>
         <h3 class="list-title" id="pharmacy-list-title">Mais perto de você</h3>
         <div id="pharmacy-list" class="pharmacy-list"></div>
@@ -186,7 +185,7 @@
               <span>Enviar foto</span>
               <input type="file" accept="image/*" capture="environment" class="hidden" onchange="readPhoto(this)">
             </label>
-            <button class="scan-aux-btn" id="scanner-stop" onclick="stopScanner(true)" hidden>
+            <button class="scan-aux-btn" id="scanner-stop" onclick="stopScanner(true)" disabled>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
                 <path d="M15.5 8.2V7.4A1.4 1.4 0 0 0 14.1 6H9.9l-.9 1.4"/><path d="M5.4 6.6A1.4 1.4 0 0 0 4.5 8v8.6A1.4 1.4 0 0 0 5.9 18h8.2"/><path d="M19.5 9.4v5.9l-3.3-2.6"/><path d="M4 3.6l16 16.8"/>
               </svg>
@@ -212,9 +211,14 @@
           <!-- 1. remédio -->
           <div class="rem-step">
             <div class="rem-step-head"><span class="rem-step-num">1</span><h3>Qual remédio?</h3></div>
-            <input id="rem-med" class="rem-input" type="text" autocomplete="off" placeholder="Ex: Losartana 50mg"
-                   oninput="onReminderMedInput()" onkeydown="if(event.key==='Enter') addReminder()">
-            <div class="rem-chips" id="rem-med-chips"></div>
+            <div class="rem-search">
+              <input id="rem-med" class="rem-input" type="text" autocomplete="off" role="combobox"
+                     aria-autocomplete="list" aria-expanded="false" aria-controls="rem-med-suggest"
+                     placeholder="Digite o nome do remédio"
+                     oninput="onReminderMedInput()" onfocus="openMedSuggestions()"
+                     onblur="closeMedSuggestions(true)" onkeydown="onReminderMedKey(event)">
+              <div class="rem-suggest hidden" id="rem-med-suggest" role="listbox"></div>
+            </div>
           </div>
 
           <!-- 2. horário -->

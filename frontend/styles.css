@@ -441,7 +441,9 @@ input[type=search]::-webkit-search-cancel-button{cursor:pointer;}
 .scan-aux-btn:hover{border-color:var(--green-400); background:var(--surface-2);}
 .scan-aux-btn:active{transform:scale(.98);}
 #scanner-stop{color:var(--ink-soft);}
-#scanner-stop:hover{border-color:var(--line); color:var(--ink);}
+#scanner-stop:hover:not(:disabled){border-color:var(--line); color:var(--ink);}
+.scan-aux-btn:disabled{opacity:.45; cursor:not-allowed; transform:none;}
+.scan-aux-btn:disabled:hover{border-color:var(--line); background:var(--surface);}
 @media (max-width:400px){
   .scan-aux-btn{font-size:calc(12.5px * var(--fs)); gap:6px; padding:11px 10px;}
 }
@@ -1007,6 +1009,24 @@ input[type=search]::-webkit-search-cancel-button{cursor:pointer;}
   background:var(--bg); color:var(--ink); font-size:calc(17px * var(--fs)); font-family:inherit; outline:none;
 }
 .rem-input:focus{border-color:var(--green-500); box-shadow:0 0 0 3px rgba(47,168,94,.15);}
+
+/* Sugestões enquanto digita o remédio, como a barra de busca do navegador. */
+.rem-search{position:relative;}
+/* A lista entra no fluxo (empurra o resto para baixo) em vez de flutuar por
+   cima: assim o próximo passo nunca fica escondido atrás dela. */
+.rem-suggest{
+  margin-top:8px; background:var(--bg); border:1.5px solid var(--line);
+  border-radius:14px; overflow:hidden;
+}
+.rem-suggest-item{
+  display:flex; flex-direction:column; gap:2px; width:100%; text-align:left; cursor:pointer;
+  padding:11px 14px; border:none; background:transparent; font-family:inherit; color:var(--ink);
+  border-bottom:1px solid var(--line);
+}
+.rem-suggest-item:last-child{border-bottom:none;}
+.rem-suggest-item:hover, .rem-suggest-item.active{background:var(--surface-2);}
+.rs-name{font-size:calc(15px * var(--fs)); font-weight:600; line-height:1.3;}
+.rs-sub{font-size:calc(12.5px * var(--fs)); color:var(--ink-soft);}
 
 .rem-chips{display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;}
 .rem-chips-label{width:100%; font-size:calc(12.5px * var(--fs)); color:var(--ink-soft); margin-bottom:2px;}

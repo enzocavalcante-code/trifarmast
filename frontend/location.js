@@ -115,10 +115,21 @@ function pharmacyDistance(pharm){
 const GPS = {
   exactM: 30,            // "na porta de casa": para de procurar ao chegar nisso
   goodM: 100,            // já serve para a entrega
+  quickTimeoutMs: 9000,  // primeira tentativa, rápida, sem exigir precisão
+  quickMaxAgeMs: 120000, // aceita uma posição de até 2 min que o aparelho já tenha
   firstTimeoutMs: 30000, // o GPS do celular pode levar ~20 s para a primeira leitura exata
-  networkTimeoutMs: 12000,
+  networkTimeoutMs: 15000,
   refineMs: 45000,       // continua melhorando em segundo plano depois da 1ª leitura
 };
+
+// Uma leitura só, sem ficar ouvindo o GPS.
+function getPositionOnce({ highAccuracy = false, timeoutMs = 9000, maximumAge = 0 } = {}){
+  return new Promise((resolve, reject)=>{
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: highAccuracy, timeout: timeoutMs, maximumAge,
+    });
+  });
+}
 
 let gpsWatchId = null;
 function stopGpsWatch(){
@@ -186,43 +197,27 @@ async function permissionState(){
   return 'prompt';
 }
 
-// Motivo de o GPS não ter funcionado, no idioma de quem está usando o app.
+// Motivo de o GPS não ter funcionado, em uma linha.
 function geolocationErrorMessage(err){
-  if(!window.isSecureContext){
-    return 'O navegador só libera a localização exata em endereços <b>https</b> (ou em <b>localhost</b>). ' +
-           'Abrindo o app pelo número de IP da máquina (http://192.168…), o Chrome bloqueia o GPS sem nem perguntar.';
-  }
-  if(err && err.code === 1) return 'A localização está bloqueada para este site. Toque no <b>cadeado</b> ao lado do endereço → Permissões → Localização → Permitir.';
-  if(err && err.code === 3) return 'O GPS demorou demais para responder. Em lugar fechado o sinal pode não chegar: tente perto de uma janela ou na rua.';
-  if(/Android/.test(navigator.userAgent)) return 'O aparelho não informou a localização. Puxe a barra de cima e veja se a <b>Localização</b> do Android está ligada.';
-  if(/iPhone|iPad/.test(navigator.userAgent)) return 'O aparelho não informou a localização. Veja em <b>Ajustes → Privacidade → Serviços de Localização</b> se o seu navegador tem permissão.';
-  if(/Windows/.test(navigator.userAgent)) return 'O computador não informou a localização. Ative em <b>Configurações do Windows → Privacidade e segurança → Localização</b> (computador sem GPS costuma errar bastante).';
-  if(/Mac OS X/.test(navigator.userAgent)) return 'O computador não informou a localização. Ative em <b>Ajustes do Sistema → Privacidade e Segurança → Serviços de Localização</b>.';
-  return 'O aparelho não informou a localização. Verifique se a localização (GPS) está ligada.';
+  if(!window.isSecureContext) return 'Sem <b>https</b> o navegador não libera a localização.';
+  if(err && err.code === 1) return 'Localização bloqueada. Libere no cadeado ao lado do endereço.';
+  if(err && err.code === 3) return 'O GPS demorou demais. Tente perto de uma janela ou na rua.';
+  return 'Não consegui sua localização. Veja se o GPS do aparelho está ligado.';
 }
 
-// Linha técnica embaixo do aviso: ajuda a entender por que falhou.
-function locationFailureDetails(err){
-  const codes = { 1: 'permissão negada', 2: 'posição indisponível', 3: 'tempo esgotado' };
-  const parts = [];
-  if(err && err.code) parts.push(`erro ${err.code} (${codes[err.code] || 'desconhecido'})`);
-  if(err && err.message) parts.push(escapeHtml(String(err.message).slice(0, 80)));
-  parts.push(window.isSecureContext ? 'conexão segura' : 'conexão sem https');
-  return parts.join(' · ');
-}
-
-// Aviso de GPS indisponível, com o que fazer e um botão para tentar de novo.
-function showGpsProblem(err){
+// Aviso de GPS indisponível: a mensagem, a saída e o botão de tentar de novo.
+function showGpsProblem(){
   setLocStatus(`<span>${loc.gpsError}</span>
-    <span class="loc-tip">Enquanto isso, digite seu <b>endereço ou CEP</b> no campo acima — a entrega usa esse endereço.</span>
-    <span class="loc-detail">${locationFailureDetails(err)}</span>
-    <button class="btn-outline-sm" onclick="requestMapLocation(true)">Tentar o GPS de novo</button>`, 'warn');
+    <span class="loc-tip">Ou digite seu <b>endereço ou CEP</b> acima.</span>
+    <button class="btn-outline-sm" onclick="requestMapLocation(true)">Tentar de novo</button>`, 'warn');
 }
 
 async function requestMapLocation(userInitiated = false){
-  if(loc.locating) return;
+  // Uma tentativa travada não pode bloquear as próximas para sempre.
+  if(loc.locating && Date.now() - (loc.locatingSince || 0) < 60000) return;
+  loc.locatingSince = Date.now();
   if(!('geolocation' in navigator)){
-    loc.gpsError = 'Seu navegador não oferece localização.';
+    loc.gpsError = 'Seu navegador não tem localização.';
     return useApproximateLocation({ code: 2, message: 'navegador sem geolocalização' });
   }
   // Sem https o navegador nem pergunta: explica em vez de insistir.
@@ -242,7 +237,7 @@ async function requestMapLocation(userInitiated = false){
   loc.locating = true;
   setGpsButtonBusy(true);
   stopRefining();
-  setLocStatus('<span class="spinner"></span> Procurando sua localização… se o navegador perguntar, toque em <b>Permitir</b>.');
+  setLocStatus('<span class="spinner"></span> Procurando sua localização… toque em <b>Permitir</b> se o navegador perguntar.');
 
   let got = false;
   // Cada leitura melhor já entra no mapa, com a precisão à vista.
@@ -263,23 +258,37 @@ async function requestMapLocation(userInitiated = false){
   };
 
   let lastError = null;
+  /* 1) Primeiro uma leitura rápida, sem exigir precisão e aceitando uma posição
+     recente que o aparelho já tenha (Wi-Fi/antena). É o que destrava o mapa em
+     poucos segundos — o GPS exato costuma demorar e, em alguns celulares,
+     responder "posição indisponível" antes de esquentar. */
   try{
-    await trackPosition({ highAccuracy: true, timeoutMs: GPS.firstTimeoutMs, stopAtM: GPS.exactM, onReading: apply });
-  }catch(err){
-    lastError = err;
-    // Sem nenhuma leitura do GPS, tenta pela rede/Wi-Fi (é assim que funciona em computadores).
-    if(!got && !(err && err.code === 1)){
-      setLocStatus('<span class="spinner"></span> GPS sem sinal. Tentando pela rede Wi-Fi…');
-      try{
-        await trackPosition({ highAccuracy: false, timeoutMs: GPS.networkTimeoutMs, stopAtM: GPS.goodM, onReading: apply });
-        lastError = null;
-      }catch(err2){ lastError = err2; }
+    const quick = await getPositionOnce({ highAccuracy: false, timeoutMs: GPS.quickTimeoutMs, maximumAge: GPS.quickMaxAgeMs });
+    await apply(quick);
+  }catch(err){ lastError = err; }
+
+  // 2) Agora sim o GPS, para afinar a posição (ou achá-la, se a rápida falhou).
+  if(!(lastError && lastError.code === 1)){
+    try{
+      await trackPosition({ highAccuracy: true, timeoutMs: GPS.firstTimeoutMs, stopAtM: GPS.exactM, onReading: apply });
+      lastError = null;
+    }catch(err){
+      if(!got) lastError = err;
+      // Nenhuma leitura ainda: tenta pela rede/Wi-Fi (é assim que funciona em computadores).
+      if(!got && !(err && err.code === 1)){
+        setLocStatus('<span class="spinner"></span> GPS sem sinal. Tentando pela rede…');
+        try{
+          await trackPosition({ highAccuracy: false, timeoutMs: GPS.networkTimeoutMs, stopAtM: GPS.goodM, onReading: apply });
+          lastError = null;
+        }catch(err2){ lastError = err2; }
+      }
     }
   }
   loc.locating = false;
   setGpsButtonBusy(false);
 
   if(got){
+    lastLocationFix = Date.now();
     updateLocationStatus();
     refineGpsInBackground();   // continua afinando a precisão sozinho
     if(userInitiated && state.activeTab !== 'map') showToast('Localização atualizada! Distâncias recalculadas.');
@@ -287,7 +296,7 @@ async function requestMapLocation(userInitiated = false){
   }
 
   loc.gpsError = geolocationErrorMessage(lastError);
-  if(userInitiated && state.activeTab !== 'map') showToast('Não foi possível usar o GPS. Veja a aba Farmácias.');
+  if(userInitiated && state.activeTab !== 'map') showToast('Não consegui sua localização. Veja a aba Mapa.');
   if(!loc.coords || loc.source === 'ip') await useApproximateLocation(lastError);
   else showGpsProblem(lastError);
 }
@@ -295,14 +304,14 @@ async function requestMapLocation(userInitiated = false){
 // Sem GPS: estima a localização pela conexão de internet (nível de bairro/cidade),
 // para o mapa já mostrar farmácias. A pessoa pode refinar digitando o CEP.
 async function useApproximateLocation(err = null){
-  setLocStatus('<span class="spinner"></span> Buscando sua localização aproximada…');
+  setLocStatus('<span class="spinner"></span> Buscando a localização aproximada…');
   try{
     const place = await api.approximateLocation();
     await setLocation({ lat: place.lat, lng: place.lng, source: 'ip', address: place.label });
   }catch{
     // Nem GPS nem estimativa pela internet: mostra o motivo e deixa o endereço como saída.
     if(loc.gpsError) showGpsProblem(err);
-    else setLocStatus('Não consegui descobrir sua localização automaticamente. Digite seu <b>endereço ou CEP</b> acima.', 'warn');
+    else setLocStatus('Não consegui sua localização. Digite o <b>endereço ou CEP</b> acima.', 'warn');
     if(!loc.coords) showMapAt(DEFAULT_CENTER, 12);
     return;
   }
@@ -323,10 +332,23 @@ async function initLocationSilently(){
   if(saved && saved.coords && saved.source !== 'ip' && Date.now() - saved.savedAt < LOCATION_MAX_AGE_MS){
     setLocation({ ...saved.coords, accuracy: saved.accuracy, source: saved.source, address: saved.address }, { save: false });
   }
+  // Com a permissão já dada, atualiza sozinho ao abrir o app (a guardada pode
+  // ser de outro lugar). Sem a API de permissões (iPhone), espera a aba do mapa.
   if('geolocation' in navigator && await permissionState() === 'granted') requestMapLocation(false);
   watchPermissionChanges();
   updateLocationHint();
 }
+
+/* Voltando ao app depois de um tempo (ou de sair para liberar a localização
+   nas configurações), procura a posição de novo em vez de ficar na antiga. */
+let lastLocationFix = 0;
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden || !state.user) return;
+  if(state.activeTab !== 'map' && loc.coords) return;
+  if(loc.manualAddress || loc.locating) return;
+  if(Date.now() - lastLocationFix < 60000) return;
+  requestMapLocation(false);
+});
 
 // Se a pessoa liberar a localização nas configurações do navegador, atualiza sozinho.
 async function watchPermissionChanges(){
@@ -428,10 +450,8 @@ function updateLocationStatus(err = null){
   const where = loc.address ? escapeHtml(loc.address) : 'sua localização atual';
 
   if(loc.source === 'ip'){
-    setLocStatus(`<span>Esta é a localização <b>aproximada</b> pela sua internet: <b>${where}</b>. Pode errar por vários quilômetros.</span>
-      ${loc.gpsError ? `<span class="loc-tip">${loc.gpsError}</span>` : ''}
-      <span class="loc-tip">Digite seu <b>endereço ou CEP</b> acima para acertar o ponto — é esse endereço que a entrega usa.</span>
-      ${loc.gpsError ? `<span class="loc-detail">${locationFailureDetails(err)}</span>` : ''}
+    setLocStatus(`<span>Localização <b>aproximada</b> pela internet: <b>${where}</b>.</span>
+      <span class="loc-tip">Digite seu <b>endereço ou CEP</b> acima para acertar o ponto.</span>
       <button class="btn-outline-sm" onclick="requestMapLocation(true)">Tentar o GPS de novo</button>`, 'warn');
     return;
   }
@@ -446,8 +466,7 @@ function updateLocationStatus(err = null){
     : '';
   // Precisão ruim: oferece melhorar sem ter que procurar o botão lá em cima.
   const improve = loc.accuracy && loc.accuracy > GPS.goodM
-    ? `<span class="loc-tip">O sinal ainda está fraco. Perto de uma janela ou na rua a precisão melhora.</span>
-       <button class="btn-outline-sm" onclick="requestMapLocation(true)">Melhorar precisão</button>`
+    ? `<button class="btn-outline-sm" onclick="requestMapLocation(true)">Melhorar precisão</button>`
     : '';
   setLocStatus(`<span>Você está em: <b>${where}</b>${precision}</span>${improve}`, 'ok');
 }
@@ -461,7 +480,7 @@ function updateLocationHint(){
   }
   hint.innerHTML = `
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
-    <span>Ative sua localização para ver a distância real até cada farmácia.</span>
+    <span>Ative a localização para ver a distância até cada farmácia.</span>
     <button class="link-btn" onclick="requestMapLocation(true)">Ativar</button>
     <button class="link-btn" onclick="switchTab('map'); setTimeout(()=>$('loc-input').focus(), 80)">Digitar CEP</button>`;
   hint.classList.remove('hidden');
@@ -493,7 +512,7 @@ async function searchAddress(){
 
 /* ---------------- farmácias reais ao redor ---------------- */
 
-async function loadNearbyPharmacies(requestId){
+async function loadNearbyPharmacies(requestId, attempt = 1){
   const center = loc.coords;
   try{
     const data = await api.nearbyPharmacies(center.lat, center.lng);
@@ -517,6 +536,11 @@ async function loadNearbyPharmacies(requestId){
     loc.pharmaciesStatus = 'done';
   }catch(e){
     if(requestId !== loc.requestId) return;
+    // O serviço de mapas às vezes demora; uma segunda tentativa resolve a maioria.
+    if(attempt === 1){
+      setTimeout(()=>{ if(requestId === loc.requestId) loadNearbyPharmacies(requestId, 2); }, 2500);
+      return;
+    }
     loc.pharmaciesStatus = 'error';
     loc.pharmaciesError = e.message;
   }
@@ -546,9 +570,11 @@ function initMap(){
         showMapAt(loc.coords, loc.source === 'ip' ? 13 : 15);
         renderMapMarkers();
       }
-      // Busca a localização exata, a menos que ela já tenha vindo do GPS
-      // ou que a pessoa tenha digitado um endereço nesta visita.
-      if(loc.source !== 'gps' && !loc.manualAddress && !loc.locating) requestMapLocation(false);
+      /* Sempre procura a posição atual ao abrir o mapa. Antes, uma leitura
+         guardada de até 6 h atrás fazia o app nem tentar — e o mapa ficava
+         mostrando onde a pessoa estava ontem. Só não insiste se ela digitou
+         um endereço nesta visita. */
+      if(!loc.manualAddress && !loc.locating) requestMapLocation(false);
     }
     renderPharmacyList();
   }, 0);
@@ -615,7 +641,8 @@ function renderMapMarkers(){
   const onMap = new Map(loc.pharmacies.map(p => [p.id, p]));
   Object.values(loc.chainMatches).forEach(p => onMap.set(p.id, p));
   [...onMap.values()].sort((a, b) => a.km - b.km).forEach((p, i)=>{
-    const marker = L.marker([p.lat, p.lng], { icon: pinIcon(p.chainId ? 'partner' : 'pharmacy') })
+    // Todas as farmácias do app são parceiras: um único pino verde.
+    const marker = L.marker([p.lat, p.lng], { icon: pinIcon('pharmacy') })
       .bindPopup(pharmacyPopup(p)).addTo(mapLayers);
     pharmacyMarkers.set(p.id, marker);
     if(i < 8) bounds.push([p.lat, p.lng]);
@@ -642,7 +669,7 @@ function renderPharmacyList(){
   const title = $('pharmacy-list-title');
   if(!loc.coords){
     title.textContent = 'Mais perto de você';
-    el.innerHTML = `<div class="empty-inline">Permita a localização ou digite um endereço para ver as farmácias ao redor.</div>`;
+    el.innerHTML = `<div class="empty-inline">Ative a localização ou digite um endereço para ver as farmácias.</div>`;
     return;
   }
   if(loc.pharmaciesStatus === 'loading'){
@@ -650,7 +677,7 @@ function renderPharmacyList(){
     return;
   }
   if(loc.pharmaciesStatus === 'error'){
-    el.innerHTML = `<div class="empty-inline">${escapeHtml(loc.pharmaciesError || 'Não foi possível carregar as farmácias agora.')}
+    el.innerHTML = `<div class="empty-inline">${escapeHtml(loc.pharmaciesError || 'Não consegui carregar as farmácias agora.')}
       <div class="inline-actions">
         <button class="btn-outline-sm" onclick="retryPharmacies()">Tentar de novo</button>
         <a class="btn-outline-sm" href="${googleMapsSearchUrl(loc.coords)}" target="_blank" rel="noopener">Ver no Google Maps</a>
@@ -668,7 +695,7 @@ function renderPharmacyList(){
       <button class="near-main" onclick="focusPharmacy('${p.id}')">
         ${pharmacyLogoHtml(p, 'near-logo')}
         <span class="near-text">
-          <b>${escapeHtml(p.name)}${p.chainId ? '<em class="partner-tag">Parceira</em>' : ''}</b>
+          <b>${escapeHtml(p.name)}</b>
           <span>${[p.street, p.suburb].filter(Boolean).map(escapeHtml).join(' · ') || 'Endereço não informado'}</span>
         </span>
         <span class="near-km">${formatKm(p.km)}${p.open24h ? '<em>24h</em>' : ''}</span>

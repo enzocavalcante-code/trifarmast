@@ -793,7 +793,10 @@ function setScannerUI(stateName, custom = {}){
   frame.dataset.state = stateName;
   $('scan-overlay').classList.toggle('hidden', live);
   $('scan-guide').classList.toggle('hidden', !live);
-  $('scanner-stop').hidden = !live;
+  // O botão continua à vista, mas só funciona com a câmera no ar.
+  const stop = $('scanner-stop');
+  stop.hidden = false;
+  stop.disabled = !live;
   $('scan-overlay-icon').innerHTML = preset.icon || '';
   $('scan-overlay-text').textContent = preset.text || '';
   const button = $('scan-overlay-btn');
@@ -806,15 +809,15 @@ function setScannerUI(stateName, custom = {}){
 function scannerErrorMessage(error){
   const name = error && error.name;
   if(name === 'NotAllowedError' || name === 'SecurityError'){
-    return 'Você não autorizou o uso da câmera. Toque no cadeado ao lado do endereço do site e permita a câmera.';
+    return 'Câmera bloqueada. Libere no cadeado ao lado do endereço.';
   }
   if(name === 'NotFoundError' || name === 'DevicesNotFoundError'){
-    return 'Não encontramos nenhuma câmera neste aparelho.';
+    return 'Nenhuma câmera neste aparelho.';
   }
   if(name === 'NotReadableError' || name === 'TrackStartError'){
-    return 'A câmera está sendo usada por outro aplicativo. Feche o outro app e tente de novo.';
+    return 'A câmera está em uso por outro app.';
   }
-  return 'Não foi possível abrir a câmera agora.';
+  return 'Não consegui abrir a câmera.';
 }
 
 function showScannerError(message){
@@ -823,7 +826,7 @@ function showScannerError(message){
     icon: ICON_CAMERA_OFF,
     text: message,
     button: 'Tentar de novo',
-    caption: 'Você também pode escolher um remédio na lista abaixo.',
+    caption: 'Ou escolha um remédio na lista abaixo.',
   });
 }
 
@@ -848,7 +851,7 @@ async function startScanner(userAsked = false){
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.isSecureContext){
     setScannerUI('error', {
       icon: ICON_CAMERA_OFF,
-      text: 'Este navegador não libera a câmera para o site.',
+      text: 'Este navegador não libera a câmera.',
       button: '',
       caption: 'Escolha um remédio na lista abaixo.',
     });
@@ -935,7 +938,8 @@ function stopScanner(userAsked = false){
   const wasOn = !!scannerStream || scannerStarting;
   stopScannerStream();
   if(!$('scanner-frame')) return;
-  if(userAsked) setScannerUI('off', { caption: 'Câmera desligada. Ligue de novo quando quiser.' });
+  // Só avisa que desligou se havia algo ligado.
+  if(userAsked && wasOn) setScannerUI('off', { caption: 'Câmera desligada. Ligue de novo quando quiser.' });
   else if(wasOn || state.activeTab !== 'scanner') setScannerUI('off');
 }
 
@@ -945,7 +949,7 @@ document.addEventListener('visibilitychange', ()=>{
   if(document.hidden || !scannerStream) return;
   const video = $('scanner-video');
   const live = scannerStream.getVideoTracks().some(track => track.readyState === 'live');
-  if(!live){ showScannerError('A câmera foi interrompida enquanto o app estava em segundo plano.'); return; }
+  if(!live){ showScannerError('A câmera parou enquanto o app estava em segundo plano.'); return; }
   if(video && video.paused) video.play().catch(()=>{});
 });
 function buildScannerMockList(){
@@ -1150,7 +1154,7 @@ function showScanReadError(error){
     eyebrow: 'Não deu para ler',
     title: offline ? 'Sem internet para o leitor' : 'Não consegui ler agora',
     body: offline
-      ? 'A leitura precisa de internet na primeira vez. Verifique a conexão ou escolha o remédio na lista.'
+      ? 'O leitor precisa de internet na primeira vez.'
       : 'Tente de novo com a caixa mais perto e com boa luz.',
     buttons: [{ label: 'Ler de novo', primary: true, onClick: 'captureAndRead()' }],
   });
@@ -1349,6 +1353,11 @@ const WEAK_TOKENS = new Set([
   'cabelo', 'olhos', 'sodica', 'sodico', 'potassica', 'potassico', 'calcica', 'acido',
   'cloridrato', 'sulfato', 'fosfato', 'fumarato', 'maleato', 'besilato', 'nitrato',
   'bromidrato', 'dipropionato', 'monoidratada', 'micronizada', 'revestido', 'revestidos',
+  // produtos de cuidado: o nome é palavra comum e aparece em qualquer embalagem
+  'algodao', 'gaze', 'mascara', 'luvas', 'luva', 'curativo', 'adesivo', 'esparadrapo',
+  'termometro', 'preservativo', 'fralda', 'sabonete', 'repelente', 'compressa', 'bolsa',
+  'alcool', 'oxigenada', 'protetor', 'solar', 'hidratante', 'locao', 'xampu', 'teste',
+  'medidor', 'digital', 'lancetas', 'agulhas', 'descartavel', 'descartaveis', 'estereis',
 ]);
 
 // Uma palavra do remédio aparece na leitura? Devolve como ela apareceu.
@@ -1518,12 +1527,30 @@ function mainNameToken(med){
   return ocrTokens(med.name).find(token => token.length >= 4 && !/\d/.test(token)) || '';
 }
 
-// Palavra mais provável de ser o nome do remédio, quando não achamos no catálogo.
-function bestGuessTerm(text){
-  const words = ocrTokens(text).filter(w => /^[a-z]{5,}$/.test(w));
-  const ignore = ['comprimidos', 'revestidos', 'capsulas', 'generico', 'medicamento', 'similar',
-                  'farmacia', 'drogaria', 'contem', 'oral', 'adulto', 'infantil', 'uso', 'via'];
-  const useful = words.filter(w => !ignore.includes(w));
+/* Palavra mais provável de ser o nome do remédio, quando não achamos no
+   catálogo. Só aceita palavra que PARECE palavra e que foi lida com
+   segurança — senão o app oferecia procurar por "=modo" e coisas assim. */
+const IGNORE_WORDS = ['comprimidos', 'comprimido', 'revestidos', 'capsulas', 'generico', 'medicamento',
+  'similar', 'farmacia', 'drogaria', 'contem', 'oral', 'adulto', 'infantil', 'prescricao', 'medica',
+  'venda', 'embalagem', 'posologia', 'receita', 'paciente', 'validade', 'fabricacao'];
+
+function looksLikeWord(word){
+  if(!/^[a-z]{5,16}$/.test(word)) return false;
+  const vowels = (word.match(/[aeiou]/g) || []).length;
+  if(vowels < 2 || vowels > word.length - 2) return false;     // precisa de vogal e de consoante
+  if(/(.)\1\1/.test(word)) return false;                       // "aaa" não é palavra
+  if(/[qwxz]{2}|[bcdfgjklmnpqrstvwxz]{4}/.test(word)) return false;   // monte de consoantes
+  return true;
+}
+
+function bestGuessTerm(input){
+  // Só palavras bem lidas entram no chute.
+  const words = typeof input === 'string'
+    ? ocrTokens(input).map(token => ({ token, conf: null }))
+    : scanWords(input).filter(w => w.conf == null || w.conf >= 78);
+  const useful = words
+    .map(w => w.token)
+    .filter(token => looksLikeWord(token) && !IGNORE_WORDS.includes(token));
   return (useful.sort((a, b) => b.length - a.length)[0] || '').trim();
 }
 
@@ -1533,28 +1560,12 @@ function handleScannedText(input){
   const clean = String(reading.text || '').replace(/\s+/g, ' ').trim();
   const quality = readingQuality(reading);
 
-  if(clean.length < 3 || !quality.words.length){
-    showScanOutcome({
-      tone: 'warn',
-      eyebrow: 'Não deu para ler',
-      title: 'Não achei nenhuma palavra',
-      body: 'Aproxime a caixa, deixe o nome dentro da moldura e evite sombra na embalagem.',
-      buttons: [{ label: 'Ler de novo', primary: true, onClick: 'captureAndRead()' }],
-    });
-    return;
-  }
-
-  // Letras embaralhadas (mirou rápido, imagem tremida, objeto qualquer):
-  // é melhor pedir outra foto do que chutar um remédio.
-  if(quality.hasConfidence && (!quality.reliable.length || quality.strongest < OCR_CONF.best)){
-    showScanOutcome({
-      tone: 'warn',
-      eyebrow: 'Leitura embaralhada',
-      title: 'As letras saíram tremidas',
-      body: 'Segure o aparelho parado por um instante, com o nome do remédio dentro da moldura e bem iluminado.',
-      buttons: [{ label: 'Ler de novo', primary: true, onClick: 'captureAndRead()' }],
-      footer: 'Prefere procurar pelo nome? <button class="link-btn" onclick="switchTab(\'home\')">Ir para a busca</button>',
-    });
+  // Nada legível, letras embaralhadas ou objeto qualquer: a mensagem é a mesma,
+  // curta e sem mostrar o rabisco que o leitor achou que era texto.
+  const unreadable = clean.length < 3 || !quality.words.length
+    || (quality.hasConfidence && (!quality.reliable.length || quality.strongest < OCR_CONF.best));
+  if(unreadable){
+    showNoMedicineFound();
     return;
   }
 
@@ -1587,7 +1598,6 @@ function handleScannedText(input){
     showScanOutcome({
       eyebrow: `Mais de um remédio ${(SCAN_SOURCES[source] || SCAN_SOURCES.texto).where}`,
       title: 'Qual destes é o seu?',
-      body: escapeHtml(`Li “${clean.slice(0, 60)}”`),
       buttons: matches.slice(0, 3).map((m, i) => ({
         label: m.med.name, primary: i === 0, onClick: `scanResult('${m.med.id}')`,
       })),
@@ -1596,14 +1606,20 @@ function handleScannedText(input){
     return;
   }
 
-  const guess = bestGuessTerm(clean);
+  showNoMedicineFound(bestGuessTerm(reading));
+}
+
+/* Uma mensagem só para "não achei remédio nenhum", venha de foto ruim, de
+   objeto qualquer ou de um remédio fora do catálogo. Nunca mostra o texto
+   cru da leitura: era de lá que saíam os "=modo..." na tela. */
+function showNoMedicineFound(guess = ''){
   showScanOutcome({
     tone: 'warn',
-    eyebrow: scanEyebrow(source),
-    title: escapeHtml(clean.slice(0, 60)),
+    eyebrow: 'Leitura',
+    title: 'Não consegui identificar nenhum remédio',
     body: guess
-      ? 'Este remédio não está no nosso catálogo, mas você pode procurar assim mesmo.'
-      : 'Não reconheci nenhum remédio nesse texto.',
+      ? `Li “${escapeHtml(guess)}”, que não está no catálogo. Quer procurar assim mesmo?`
+      : 'Deixe o nome e a dosagem dentro da moldura, com o aparelho parado.',
     buttons: [
       ...(guess ? [{ label: `Procurar “${guess}”`, primary: true, onClick: `searchForTerm('${guess.replace(/'/g, "\\'")}')` }] : []),
       { label: 'Ler de novo', primary: !guess, onClick: 'captureAndRead()' },
@@ -1695,7 +1711,7 @@ function showUncertainMedicine(med, text, source = 'texto'){
     tone: 'warn',
     eyebrow: 'Leitura incerta',
     title: `${escapeHtml(med.name)}?`,
-    body: `Li “${escapeHtml(text.slice(0, 48))}” ${escapeHtml((SCAN_SOURCES[source] || SCAN_SOURCES.texto).where)}. É este remédio?`,
+    body: `Li pouca coisa ${escapeHtml((SCAN_SOURCES[source] || SCAN_SOURCES.texto).where)}. É este remédio?`,
     price: cheapest,
     buttons: [
       { label: 'Sim, ver os preços', primary: true, onClick: `scanResult('${med.id}')` },
@@ -2151,12 +2167,89 @@ function dayName(date){
 
 function setReminderMed(name){
   $('rem-med').value = name;
+  closeMedSuggestions();
   renderReminderChips();
   renderReminderSummary();
 }
 function onReminderMedInput(){
+  openMedSuggestions();
   renderReminderChips();
   renderReminderSummary();
+}
+
+/* ---- sugestões enquanto digita o remédio ----
+   Uma lista curta embaixo do campo, como a barra de busca do navegador:
+   poucas opções para não tomar a tela do celular. */
+const MED_SUGGEST_MAX = 4;   // lista curta: não pode tomar a tela do celular
+let medSuggestIndex = -1;
+let medSuggestItems = [];
+
+function medSuggestions(typed){
+  const query = typed.trim();
+  if(query.length >= 2) return medsMatchingQuery(query).slice(0, MED_SUGGEST_MAX);
+  // Campo vazio: oferece o que a pessoa já comprou e, depois, os mais procurados.
+  const bought = [...new Set(state.orders.flatMap(o => o.items.map(i => i.name)))];
+  const recent = bought.map(name => state.catalog.medicines.find(m => m.name === name)).filter(Boolean);
+  const list = [...recent, ...state.catalog.medicines.filter(m => !recent.includes(m))];
+  return list.slice(0, 4);
+}
+
+function openMedSuggestions(){
+  const input = $('rem-med'), box = $('rem-med-suggest');
+  if(!input || !box) return;
+  const typed = input.value;
+  medSuggestItems = medSuggestions(typed);
+  medSuggestIndex = -1;
+  if(!medSuggestItems.length){ closeMedSuggestions(); return; }
+  box.innerHTML = medSuggestItems.map((med, i) => `
+    <button type="button" class="rem-suggest-item" role="option" data-med="${escapeHtml(med.name)}" data-index="${i}">
+      <span class="rs-name">${escapeHtml(med.name)}</span>
+      ${med.presentation ? `<span class="rs-sub">${escapeHtml(med.presentation)}</span>` : ''}
+    </button>`).join('');
+  box.classList.remove('hidden');
+  input.setAttribute('aria-expanded', 'true');
+}
+
+function closeMedSuggestions(delayed = false){
+  const close = () => {
+    const box = $('rem-med-suggest');
+    if(box) box.classList.add('hidden');
+    const input = $('rem-med');
+    if(input) input.setAttribute('aria-expanded', 'false');
+    medSuggestIndex = -1;
+  };
+  // No clique, o blur vem antes: espera um instante para a escolha valer.
+  if(delayed) setTimeout(close, 160);
+  else close();
+}
+
+function highlightMedSuggestion(index){
+  const box = $('rem-med-suggest');
+  if(!box || !medSuggestItems.length) return;
+  const total = medSuggestItems.length;
+  medSuggestIndex = (index + total) % total;
+  [...box.querySelectorAll('.rem-suggest-item')].forEach((el, i) =>
+    el.classList.toggle('active', i === medSuggestIndex));
+}
+
+function onReminderMedKey(event){
+  const open = !$('rem-med-suggest').classList.contains('hidden');
+  if(event.key === 'ArrowDown' || event.key === 'ArrowUp'){
+    event.preventDefault();
+    if(!open) return openMedSuggestions();
+    highlightMedSuggestion(medSuggestIndex + (event.key === 'ArrowDown' ? 1 : -1));
+    return;
+  }
+  if(event.key === 'Escape'){ closeMedSuggestions(); return; }
+  if(event.key === 'Enter'){
+    if(open && medSuggestIndex >= 0){
+      event.preventDefault();
+      setReminderMed(medSuggestItems[medSuggestIndex].name);
+      return;
+    }
+    closeMedSuggestions();
+    addReminder();
+  }
 }
 function setReminderTime(time){
   if(!/^\d{2}:\d{2}$/.test(time)) return;
@@ -2228,15 +2321,6 @@ const chip = (label, active, attr, hint = '') =>
   `<button class="rem-chip ${active ? 'active' : ''}" ${attr}>${escapeHtml(label)}${hint ? `<small>${escapeHtml(hint)}</small>` : ''}</button>`;
 
 function renderReminderChips(){
-  // Remédios que a pessoa já comprou aparecem prontos para tocar.
-  const bought = [...new Set(state.orders.flatMap(o => o.items.map(i => i.name)))].slice(0, 4);
-  const suggestions = bought.length ? bought : state.catalog.medicines.slice(0, 4).map(m => m.name);
-  const typed = $('rem-med').value.trim();
-  $('rem-med-chips').innerHTML = suggestions.length
-    ? `<span class="rem-chips-label">Ou toque em um remédio:</span>` +
-      suggestions.map(name => chip(name, typed === name, `data-med="${escapeHtml(name)}"`)).join('')
-    : '';
-
   $('rem-time-chips').innerHTML = TIME_PRESETS
     .map(preset => chip(preset.label, reminderForm.time === preset.time, `data-time="${preset.time}"`, preset.hint))
     .join('');
@@ -2615,9 +2699,11 @@ window.addEventListener('resize', ()=>{
 // Os botões de remédio/horário/dia/repetição são desenhados por JS: um único
 // ouvinte por grupo cuida dos toques.
 function bindReminderChips(){
-  $('rem-med-chips').addEventListener('click', event => {
+  $('rem-med-suggest').addEventListener('mousedown', event => {
     const button = event.target.closest('[data-med]');
-    if(button) setReminderMed(button.dataset.med);
+    if(!button) return;
+    event.preventDefault();          // não deixa o campo perder o foco antes do clique
+    setReminderMed(button.dataset.med);
   });
   $('rem-time-chips').addEventListener('click', event => {
     const button = event.target.closest('[data-time]');
