@@ -172,11 +172,27 @@
         </div>
         <p class="scanner-caption" id="scanner-status">Deixe o nome do remédio dentro da moldura.</p>
         <div class="scanner-actions">
-          <button class="btn btn-primary" onclick="captureAndRead()">Ler o remédio</button>
-          <label class="btn btn-ghost" style="cursor:pointer;">Enviar foto
-            <input type="file" accept="image/*" capture="environment" class="hidden" onchange="readPhoto(this)">
-          </label>
-          <button class="btn btn-ghost" id="scanner-stop" onclick="stopScanner(true)" hidden>Desligar câmera</button>
+          <button class="btn btn-primary scan-shoot" onclick="captureAndRead()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/>
+            </svg>
+            <span>Ler o remédio</span>
+          </button>
+          <div class="scan-aux">
+            <label class="scan-aux-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                <rect x="3" y="4.5" width="18" height="15" rx="3"/><circle cx="8.5" cy="10" r="1.6"/><path d="M4 16.5l4.6-4a1.6 1.6 0 0 1 2.2.05L15 16.5m0 0l2-1.8a1.6 1.6 0 0 1 2.2.05L20 15.6"/>
+              </svg>
+              <span>Enviar foto</span>
+              <input type="file" accept="image/*" capture="environment" class="hidden" onchange="readPhoto(this)">
+            </label>
+            <button class="scan-aux-btn" id="scanner-stop" onclick="stopScanner(true)" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                <path d="M15.5 8.2V7.4A1.4 1.4 0 0 0 14.1 6H9.9l-.9 1.4"/><path d="M5.4 6.6A1.4 1.4 0 0 0 4.5 8v8.6A1.4 1.4 0 0 0 5.9 18h8.2"/><path d="M19.5 9.4v5.9l-3.3-2.6"/><path d="M4 3.6l16 16.8"/>
+              </svg>
+              <span>Desligar câmera</span>
+            </button>
+          </div>
         </div>
         <div class="scan-sheet hidden" id="scan-outcome"></div>
         <div class="scanner-fallback">

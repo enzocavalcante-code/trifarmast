@@ -632,9 +632,15 @@ function onSearchInput(){
 }
 
 function filteredMeds(){
-  const q = normalizeText($('search-input').value.trim());
   let meds = allMeds();
   if(state.activeCat !== 'Todos') meds = meds.filter(m=>m.cat===state.activeCat);
+  return medsMatchingQuery($('search-input').value, meds);
+}
+
+// Mesma busca que a tela de resultados usa. Fica separada para que a leitura da
+// câmera possa contar e precificar exatamente o que a pesquisa vai mostrar.
+function medsMatchingQuery(query, meds = allMeds()){
+  const q = normalizeText(String(query || '').trim());
   if(!q) return meds;
   const terms = q.split(/\s+/);
   return meds
@@ -1254,25 +1260,42 @@ function handleScannedText(text){
 /* Folha de resultado: sobe por cima da câmera com o que foi lido, o menor
    preço e o caminho para a tela de compra. */
 
-// Menor preço e em quantas farmácias o remédio tem preço.
+// Menor preço e em quantas farmácias o remédio tem preço. Usa a mesma lista de
+// ofertas da tela de busca, para a etiqueta amarela bater com o "a partir de".
 function medPriceSummary(med){
-  const prices = Object.values(med.prices || {}).filter(p => p != null);
+  const offers = med ? pharmacyOffers(med) : [];
   return {
-    cheapest: prices.length ? Math.min(...prices) : null,
-    pharmacies: prices.length,
+    cheapest: offers.length ? offers[0].price : null,
+    pharmacies: offers.length,
   };
+}
+
+// O que a busca por este texto vai mostrar: os remédios (só os que têm preço em
+// alguma farmácia) e quantas farmácias aparecem no total.
+function searchPreview(term){
+  const meds = medsMatchingQuery(term).filter(m => pharmacyOffers(m).length);
+  const pharmacies = new Set();
+  meds.forEach(m => pharmacyOffers(m).forEach(o => pharmacies.add(o.id)));
+  return { meds, pharmacies: pharmacies.size };
+}
+
+function countLabel(n, one, many){
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 function priceTagHtml(value){
   if(value == null) return '';
   const [reais, centavos] = formatBRL(value).replace(/^R\$\s*/, '').split(',');
-  return `<span class="price-tag"><span class="pt-cur">R$</span><span class="pt-val">${reais},${centavos}</span></span>`;
+  return `<div class="ss-price">
+    <small>a partir de</small>
+    <span class="price-tag"><span class="pt-cur">R$</span><span class="pt-val">${reais},${centavos}</span></span>
+  </div>`;
 }
 
 function medSheetLine(med){
   const { pharmacies } = medPriceSummary(med);
-  return [med.presentation, pharmacies ? `em ${pharmacies} ${pharmacies === 1 ? 'farmácia' : 'farmácias'}` : '']
-    .filter(Boolean).join(' ');
+  return [med.presentation, pharmacies ? `em ${countLabel(pharmacies, 'farmácia', 'farmácias')}` : '']
+    .filter(Boolean).join(' · ');
 }
 
 // Resultado da leitura, numa folha branca sobre a câmera.
@@ -1310,14 +1333,18 @@ function showScannedMedicine(med){
 
 // Vários tamanhos do mesmo remédio: abre a busca com todos.
 function showScannedTerm(term, meds){
-  const cheapest = meds
-    .map(m => medPriceSummary(m).cheapest)
-    .filter(p => p != null)
-    .sort((a, b) => a - b)[0];
+  // A etiqueta mostra o mesmo preço que vai aparecer no topo da pesquisa, e a
+  // linha conta quantas apresentações e farmácias a pesquisa realmente tem.
+  const preview = searchPreview(term);
+  const list = preview.meds.length ? preview.meds : (meds || []);
+  const cheapest = medPriceSummary(list[0]).cheapest;
   const name = term.charAt(0).toUpperCase() + term.slice(1);
   showScanOutcome({
     title: escapeHtml(name),
-    body: `${meds.length} apresentações encontradas`,
+    body: [
+      countLabel(list.length, 'opção', 'opções'),
+      preview.pharmacies ? `em ${countLabel(preview.pharmacies, 'farmácia', 'farmácias')}` : '',
+    ].filter(Boolean).join(' · '),
     price: cheapest,
     buttons: [{ label: 'Ver os preços', primary: true, onClick: `searchForTerm('${term.replace(/'/g, "\\'")}')` }],
     footer: 'Não é este remédio? <button class="link-btn" onclick="captureAndRead()">Ler de novo</button>',
