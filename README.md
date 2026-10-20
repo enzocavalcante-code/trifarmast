@@ -1,14 +1,11 @@
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo.png">
-    <img src="frontend/assets/logo.png" alt="Trifarmas" width="300">
-  </picture>
-</div>
+<!-- A logo tem duas versões: a clara aparece no tema escuro do GitHub. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="frontend/assets/logo-dark.png">
+  <img src="frontend/assets/logo.png" alt="Trifarmas" width="420">
+</picture>
 
-----------------------------------------------------------------------------
-
-![Status:](https://img.shields.io/badge/status-em%20desenvolvimento-1e8a4c?style=for-the-badge)
-![Licença:](https://img.shields.io/badge/licen%C3%A7a-MIT-1e8a4c?style=for-the-badge)
+![Status](https://img.shields.io/badge/status-em%20desenvolvimento-1e8a4c?style=for-the-badge)
+![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-1e8a4c?style=for-the-badge)
 ![JavaScript](https://img.shields.io/badge/javascript-f7df1e?style=for-the-badge&logo=javascript&logoColor=000000)
 ![Node.js](https://img.shields.io/badge/node.js-5fa04e?style=for-the-badge&logo=nodedotjs&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/postgresql-4169e1?style=for-the-badge&logo=postgresql&logoColor=white)
@@ -36,20 +33,22 @@
 
 O projeto ainda está em desenvolvimento e as próximas atualizações serão voltadas para as seguintes tarefas:
 
-- [x] Comparar o preço de 160 remédios em 6 farmácias
+- [x] Comparar o preço de mais de 320 remédios e produtos em 6 farmácias
 - [x] Entrar com e-mail e senha ou com a conta do Google
 - [x] Carrinho, pagamento e código de retirada
+- [x] Escolher entre retirar na farmácia ou receber por motoboy, acompanhando a entrega no mapa
 - [x] Receita médica: anexar PDF/foto ou mostrar na retirada
 - [x] Pontos que viram cupons de desconto
 - [x] Mapa com farmácias de verdade ao redor
 - [x] Lembretes de remédio em três passos, com repetição por vários dias
+- [x] Controle de quantas unidades a pessoa tem em casa, com aviso de reposição quando faltam 5 dias
 - [x] Ver a senha enquanto digita
 - [x] Modo escuro e tamanho do texto ajustável
-- [ ] Ler a receita pela câmera e achar o remédio mais barato(com integração de IA)
-- [ ] Preços de verdade (tabela da CMED e dados das farmácias parceiras)
+- [x] Ler pela câmera o nome escrito na caixa e abrir a comparação de preços
+- [ ] Preços de verdade (tabela da CMED e dados das farmácias)
 - [ ] Pagamento de verdade com Pix
 - [ ] Retirada confirmada pela própria farmácia, no balcão
-- [ ] Aplicativo para Android e IOS
+- [ ] Aplicativo para Android e iPhone
 
 ## 💻 Pré-requisitos
 
@@ -84,7 +83,7 @@ npm install
 ```
 
 Na primeira vez que a API subir, ela cria as tabelas sozinha e já preenche o
-catálogo com as farmácias, os 160 remédios e as recompensas.
+catálogo com as farmácias, os mais de 320 remédios e as recompensas.
 
 ## ☕ Usando o Trifarmas
 
@@ -108,10 +107,14 @@ senha:  123456
 Com o app aberto, você pode:
 
 - **Buscar um remédio** pelo nome ou pelo princípio ativo (funciona com ou sem acento) e ver o preço em cada farmácia, da mais barata para a mais cara.
+- **Apontar a câmera** para a caixa (ou para um papel escrito): o app lê o texto e abre a comparação de preços daquele remédio.
 - **Montar o carrinho** e comparar quanto o pedido inteiro custa em cada farmácia antes de pagar.
-- **Pagar** (simulado) e receber o **código de retirada** na aba Pedidos.
+- **Escolher como receber**: retirar na farmácia (grátis) ou **entrega por motoboy** — a taxa aparece depois do endereço e é calculada por km (R$ 5,00 até 2 km + R$ 1,50 por km rodado).
+- **Pagar** (simulado) e receber o **código de retirada** (ou de entrega) na aba Pedidos.
+- **Acompanhar o motoboy** no mapa, do balcão da farmácia até a sua casa, com o tempo que falta e os dados do entregador.
 - **Resolver a receita** dos remédios que exigem: anexar PDF/foto ou mostrar na retirada.
 - **Criar lembretes** em três toques — remédio, horário e dia —, com opção de repetir por 7, 15 ou 30 dias.
+- **Ser avisado quando o remédio estiver acabando**: ao criar o lembrete você informa quantas unidades tem em casa; o app desconta a cada dose, calcula para quantos dias dá e avisa faltando 5 dias, com atalho para comprar de novo.
 - **Ver as farmácias ao redor** no mapa, pela localização do aparelho ou digitando o CEP.
 - **Juntar pontos** (1 ponto a cada R$ 1 pago) e trocar por cupons de desconto.
 
@@ -133,12 +136,28 @@ variáveis `DATABASE_URL`, `JWT_SECRET`, `GOOGLE_CLIENT_ID` e `CORS_ORIGINS`
 (a URL do Vercel). O arquivo `backend/render.yaml` faz tudo isso de uma vez pelo
 menu *New + → Blueprint*.
 
+**Servidor dormindo:** no plano gratuito do Render, a API hiberna depois de 15 minutos
+sem acesso e leva quase um minuto para ligar de novo. O app já acorda o servidor assim
+que a tela de login abre, enquanto a pessoa digita a senha. Para o primeiro acesso do dia
+ser instantâneo, crie um ping gratuito (UptimeRobot, cron-job.org) chamando
+`https://SEU-APP.onrender.com/health` a cada 10 minutos.
+
 **Vercel (site):** aponte `API_URL` em `frontend/config.js` para o endereço do
 Render, crie o projeto com *Root Directory* `frontend` e *Framework Preset* **Other**.
 Por fim, adicione a URL do Vercel nas *Origens JavaScript autorizadas* do seu
 Client ID do Google.
 
+## 📫 Contribuindo para o Trifarmas
 
+Para contribuir com o Trifarmas, siga estas etapas:
+
+1. Bifurque este repositório.
+2. Crie um branch: `git checkout -b <nome_branch>`.
+3. Faça suas alterações e confirme-as: `git commit -m '<mensagem_commit>'`
+4. Envie para o branch original: `git push origin trifarmas / <local>`
+5. Crie a solicitação de pull.
+
+Como alternativa, consulte a documentação do GitHub em [como criar uma solicitação pull](https://help.github.com/en/github/collaborating-with-issues-and-pull-requests/creating-a-pull-request).
 
 ## 🤝 Colaboradores
 
@@ -147,41 +166,27 @@ Agradecemos às seguintes pessoas que contribuíram para este projeto:
 <table>
   <tr>
     <td align="center">
-              <img src="frontend/assets/logo-time-white-big.png" alt="Trifarmas" width="100px">
+      <a href="https://github.com/SEU-USUARIO" title="Perfil no GitHub">
+        <img src="frontend/assets/favicon.png" width="100px;" alt="Logo do Time Trifarmas"/><br>
+        <sub>
+          <b>Time Trifarmas</b>
+        </sub>
       </a>
     </td>
-     <td align="center">
-      <a href="https://github.com/vhko20" title="Perfil no GitHub">
-              <img src="frontend/assets/oki.jfif" alt="vitor" width="100px">
-      </a>
-    </td>
-        </td>
-     <td align="center">
-      <a href="https://github.com/enzocavalcante-code" title="Perfil no GitHub">
-              <img src="frontend/assets/enzo.jfif" alt="enzo" width="100px">
-      </a>
-    </td>
-       <td align="center">
-      <a href="https://github.com/vnniwzx" title="Perfil no GitHub">
-              <img src="frontend/assets/vinicius.jfif" alt="vini" width="100px">
-      </a>
-    </td>
-      </td>
-       <td align="center">
-      <a href="https://github.com/" title="Perfil no GitHub">
-              <img src="frontend/assets/said.jfif" alt="said" width="100px">
-      </a>
-    </td>
-      </td>
-       <td align="center">
-      <a href="https://github.com/" title="Perfil no GitHub">
-              <img src="frontend/assets/anselmo.jfif" alt="anselmo" width="100px">
-      </a>
-    </td>
+    <!-- Para adicionar alguém, copie o bloco <td> acima e troque o link, a imagem e o nome. -->
   </tr>
 </table>
 
+## 😄 Seja um dos contribuidores
+
+Quer fazer parte desse projeto? Veja [como contribuir](#-contribuindo-para-o-trifarmas) e abra a sua solicitação de pull.
+
+## 📝 Licença
+
+Esse projeto está sob a licença MIT. Veja o arquivo [LICENSE.md](LICENSE.md) para mais detalhes.
+
 ---
 
-Os preços, o pagamento e a aprovação da receita deste app são **simulados**, para
-fins de estudo. Nenhuma cobrança é feita de verdade.
+Os preços, o pagamento, a aprovação da receita e a entrega por motoboy deste app são
+**simulados**, para fins de estudo. Nenhuma cobrança é feita e nenhum motoboy é chamado
+de verdade — o trajeto que aparece no mapa é uma animação.
