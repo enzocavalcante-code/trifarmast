@@ -1020,18 +1020,51 @@ async function getOcrWorker(onProgress){
   }
 }
 
+/* Só o pedaço dentro da moldura amarela vira foto. Ler a imagem inteira
+   trazia tudo o que estava em volta — e era daí que saíam as "palavras" que
+   faziam o app achar remédio em qualquer coisa. */
+function guideCrop(video){
+  const full = { x: 0, y: 0, width: video.videoWidth, height: video.videoHeight };
+  const frame = $('scanner-frame');
+  const guide = $('scan-guide');
+  if(!frame || !guide) return full;
+  const box = frame.getBoundingClientRect();
+  const area = guide.getBoundingClientRect();
+  if(!box.width || !box.height || !area.width || !area.height) return full;
+
+  // O vídeo preenche a moldura cortando as sobras (object-fit: cover).
+  const scale = Math.max(box.width / video.videoWidth, box.height / video.videoHeight);
+  const hiddenX = (video.videoWidth * scale - box.width) / 2;
+  const hiddenY = (video.videoHeight * scale - box.height) / 2;
+  const margin = 0.06;                                   // uma folga, para não cortar letra
+  const left = (area.left - box.left + hiddenX) / scale - video.videoWidth * margin;
+  const top = (area.top - box.top + hiddenY) / scale - video.videoHeight * margin;
+  const width = area.width / scale + video.videoWidth * margin * 2;
+  const height = area.height / scale + video.videoHeight * margin * 2;
+
+  const x = Math.max(0, Math.min(video.videoWidth - 1, left));
+  const y = Math.max(0, Math.min(video.videoHeight - 1, top));
+  const crop = {
+    x, y,
+    width: Math.min(width, video.videoWidth - x),
+    height: Math.min(height, video.videoHeight - y),
+  };
+  return (crop.width >= 80 && crop.height >= 80) ? crop : full;
+}
+
 // Foto do que a câmera está vendo, em tons de cinza e com contraste reforçado
 // (a leitura fica bem melhor do que na imagem crua).
 function grabCameraFrame(){
   const video = $('scanner-video');
   if(!video || !video.videoWidth) return null;
+  const crop = guideCrop(video);
   const maxWidth = 1400;
-  const scale = Math.min(1, maxWidth / video.videoWidth);
+  const scale = Math.min(2, maxWidth / crop.width);          // recorte pequeno: amplia um pouco
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(video.videoWidth * scale);
-  canvas.height = Math.round(video.videoHeight * scale);
+  canvas.width = Math.round(crop.width * scale);
+  canvas.height = Math.round(crop.height * scale);
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
   const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = image.data;
   for(let i = 0; i < data.length; i += 4){
@@ -1097,10 +1130,11 @@ async function readImage(source){
   setScanProgress(0.05, 'Preparando o leitor…');
   try{
     const worker = await getOcrWorker(setScanProgress);
-    const result = await worker.recognize(source);
-    const text = (result && result.data && result.data.text) || '';
+    // "blocks" traz cada palavra com a confiança e o tamanho das letras: é o que
+    // permite jogar fora leitura embaralhada e saber se é caixa ou papel escrito.
+    const result = await worker.recognize(source, {}, { text: true, blocks: true });
     hideScanProgress();
-    handleScannedText(text);
+    handleScannedText(buildReading(result && result.data, source));
   }catch(error){
     hideScanProgress();
     showScanReadError(error);
@@ -1150,40 +1184,223 @@ const ocrTokens = text => normalizeText(text)
   .split(/[^a-z0-9]+/)
   .filter(Boolean);
 
-// Uma palavra do remédio aparece no texto lido? (aceita pequeno erro de leitura)
-function tokenInText(token, textTokens){
-  if(textTokens.includes(token)) return true;
-  if(token.length < 5) return false;
-  const limit = token.length >= 8 ? 2 : 1;
-  return textTokens.some(word => Math.abs(word.length - token.length) <= limit && editDistance(word, token) <= limit);
+/* O leitor devolve cada palavra com uma confiança de 0 a 100 e o retângulo onde
+   ela está. Guardamos isso junto com o texto: é o que separa uma leitura de
+   verdade de um amontoado de letras que a câmera inventou ao mirar em qualquer
+   coisa — antes bastava uma palavra parecida para o app "achar" um remédio. */
+const OCR_CONF = {
+  word: 62,     // palavra confiável
+  exact: 66,    // mínimo para valer como nome igualzinho
+  fuzzy: 80,    // para aceitar o nome com uma letra errada
+  best: 70,     // a melhor palavra da foto; abaixo disso a foto não presta
+};
+
+function buildReading(data, source){
+  const text = (data && data.text) || '';
+  const imageHeight = (source && (source.height || source.naturalHeight || source.videoHeight)) || 0;
+  let words = collectOcrWords(data)
+    .map(w => ({
+      text: String((w && w.text) || '').trim(),
+      conf: w && Number.isFinite(Number(w.confidence)) ? Number(w.confidence) : null,
+      height: w && w.bbox ? Math.abs((w.bbox.y1 || 0) - (w.bbox.y0 || 0)) : 0,
+    }))
+    .filter(w => w.text);
+  // Leitor sem detalhe por palavra: seguimos só com o texto, como antes.
+  if(!words.length){
+    words = text.split(/\s+/).filter(Boolean).map(t => ({ text: t, conf: null, height: 0 }));
+  }
+  return { text, words, imageHeight };
 }
 
-// Procura no catálogo o remédio que melhor combina com o texto lido.
-function matchMedicines(text){
-  const textTokens = ocrTokens(text);
-  if(!textTokens.length) return [];
-  return state.catalog.medicines.map(med => {
-    const nameTokens = ocrTokens(med.name);
-    const ingredientTokens = ocrTokens(med.ingredient || '');
-    let score = 0;
-    let nameHit = false;
-    for(const token of nameTokens){
-      if(token.length < 4) continue;                       // "500mg" entra abaixo
-      if(tokenInText(token, textTokens)){
-        score += /\d/.test(token) ? 2 : 3;                 // nome vale mais que dosagem
-        if(!/\d/.test(token)) nameHit = true;
-      }
+// O Tesseract v5 entrega as palavras dentro de blocos → parágrafos → linhas.
+function collectOcrWords(data){
+  if(!data) return [];
+  if(Array.isArray(data.words) && data.words.length) return data.words;
+  const found = [];
+  const walk = node => {
+    if(!node || typeof node !== 'object') return;
+    if(Array.isArray(node.words)) found.push(...node.words);
+    ['blocks', 'paragraphs', 'lines'].forEach(key => {
+      if(Array.isArray(node[key])) node[key].forEach(walk);
+    });
+  };
+  (Array.isArray(data.blocks) ? data.blocks : []).forEach(walk);
+  return found;
+}
+
+// Separa o que dá para confiar. Sem confiança por palavra (leitor antigo),
+// trabalhamos com o texto inteiro, como antes.
+function readingQuality(reading){
+  // Vale palavra com duas letras ou mais e também número (a dosagem: "500").
+  const words = (reading.words || []).filter(w => /[a-zà-ú]{2,}/i.test(w.text) || /^\d+([.,]\d+)?$/.test(w.text));
+  const scored = words.filter(w => w.conf != null);
+  const mean = scored.length ? scored.reduce((sum, w) => sum + w.conf, 0) / scored.length : null;
+  // A melhor palavra vale mais que a média: numa caixa, o miolo da bula sai
+  // mal lido e derruba a média mesmo quando o nome do remédio saiu perfeito.
+  const strongest = scored.length ? Math.max(...scored.map(w => w.conf)) : null;
+  const reliable = scored.length ? scored.filter(w => w.conf >= OCR_CONF.word) : words;
+  return { words, scored, reliable, mean, strongest, hasConfidence: scored.length > 0 };
+}
+
+// Palavras lidas, já quebradas em pedaços comparáveis com o catálogo.
+function scanWords(reading){
+  const quality = readingQuality(reading);
+  const list = [];
+  const source = quality.reliable.length ? quality.reliable : quality.words;
+  source.forEach(w => ocrTokens(w.text).forEach(token => list.push({ token, conf: w.conf })));
+  if(!list.length) ocrTokens(reading.text || '').forEach(token => list.push({ token, conf: null }));
+  return mergeDoseTokens(list);
+}
+
+// O leitor entrega "500" e "mg" separados; o catálogo guarda "500mg".
+function mergeDoseTokens(list){
+  const out = [];
+  list.forEach((word, i) => {
+    out.push(word);
+    const next = list[i + 1];
+    if(next && /^\d+$/.test(word.token) && /^(mg|ml|mcg|g|ui)$/.test(next.token)){
+      const confs = [word.conf, next.conf].filter(c => c != null);
+      out.push({ token: word.token + next.token, conf: confs.length ? Math.min(...confs) : null });
     }
-    for(const token of ingredientTokens){
-      if(token.length >= 5 && tokenInText(token, textTokens)){
-        score += 2;
-        nameHit = true;
-      }
+  });
+  return out;
+}
+
+/* Palavras do catálogo que também são palavras do dia a dia (ou termos
+   químicos que se repetem em dezenas de remédios): sozinhas não provam nada.
+   É o que evitava "teste" virar "Teste de Gravidez". */
+const WEAK_TOKENS = new Set([
+  'teste', 'rapido', 'agua', 'soro', 'oral', 'ultra', 'plus', 'forte', 'total', 'extra',
+  'brasil', 'moura', 'ciclo', 'complexo', 'vitamina', 'calcio', 'ferro', 'zinco', 'oleo',
+  'creme', 'pomada', 'spray', 'colirio', 'xarope', 'gotas', 'frasco', 'solucao', 'infantil',
+  'adulto', 'composto', 'simples', 'unidade', 'noite', 'sono', 'mulher', 'homem', 'pele',
+  'cabelo', 'olhos', 'sodica', 'sodico', 'potassica', 'potassico', 'calcica', 'acido',
+  'cloridrato', 'sulfato', 'fosfato', 'fumarato', 'maleato', 'besilato', 'nitrato',
+  'bromidrato', 'dipropionato', 'monoidratada', 'micronizada', 'revestido', 'revestidos',
+]);
+
+// Uma palavra do remédio aparece na leitura? Devolve como ela apareceu.
+function tokenHit(token, words){
+  let best = null;
+  for(const word of words){
+    if(word.token === token){
+      if(word.conf == null || word.conf >= OCR_CONF.exact) return { kind: 'exact', conf: word.conf };
+      continue;
     }
-    return { med, score, nameHit };
-  })
-  .filter(r => r.nameHit && r.score >= 3)
-  .sort((a, b) => b.score - a.score || a.med.name.localeCompare(b.med.name));
+    // Uma letra errada só é aceita em palavra comprida e bem lida.
+    if(token.length >= 7 && Math.abs(word.token.length - token.length) <= 1
+       && editDistance(word.token, token) <= 1
+       && (word.conf == null || word.conf >= OCR_CONF.fuzzy)){
+      if(!best || (word.conf || 0) > (best.conf || 0)) best = { kind: 'fuzzy', conf: word.conf };
+    }
+  }
+  return best;
+}
+
+// Mantida para quem só tem o texto (testes e leitores sem confiança).
+function tokenInText(token, textTokens){
+  return !!tokenHit(token, textTokens.map(t => ({ token: t, conf: null })));
+}
+
+/* Procura no catálogo o remédio que combina com a leitura. Para um remédio ser
+   aceito não basta uma palavra parecida: ou duas partes do nome batem, ou a
+   palavra que bateu é específica daquele remédio (nada de "teste", "água"). */
+function scoreMedicine(med, words){
+  const nameTokens = [...new Set(ocrTokens(med.name))];
+  const ingredientTokens = [...new Set(ocrTokens(med.ingredient || ''))];
+  const wordTokens = nameTokens.filter(t => !/\d/.test(t) && t.length >= 4);
+  // "pistas" conta palavras diferentes: o nome e o princípio ativo repetidos
+  // ("Dipirona" / "Dipirona sódica") somam pontos, mas valem como uma pista só.
+  const matched = new Set(), strongTokens = new Set();
+  let score = 0, nameHits = 0, doseHit = false;
+
+  for(const token of nameTokens){
+    if(token.length < 4) continue;
+    const hit = tokenHit(token, words);
+    if(!hit) continue;
+    if(/\d/.test(token)){ doseHit = true; continue; }        // dosagem só soma com o nome
+    nameHits++;
+    matched.add(token);
+    score += hit.kind === 'exact' ? 4 : 2;
+    if(hit.kind === 'exact' && token.length >= 5 && !WEAK_TOKENS.has(token)) strongTokens.add(token);
+  }
+  for(const token of ingredientTokens){
+    if(token.length < 6) continue;
+    const hit = tokenHit(token, words);
+    if(!hit) continue;
+    matched.add(token);
+    score += hit.kind === 'exact' ? 3 : 1;
+    if(hit.kind === 'exact' && !WEAK_TOKENS.has(token)) strongTokens.add(token);
+  }
+  if(doseHit && matched.size) score += 2;
+
+  const hits = matched.size, strong = strongTokens.size;
+  // O nome do remédio é uma palavra só ("Dorflex", "Yasmin") e ela foi lida inteira.
+  const wholeName = wordTokens.length === 1 && nameHits === 1 && strong > 0;
+  const ok = hits > 0 && (hits >= 2 || strong > 0) && score >= 4;
+  // Confiante = duas pistas diferentes, a dosagem junto, ou o nome inteiro.
+  const sure = ok && strong > 0 && (hits >= 2 || doseHit || wholeName);
+  return { med, score, hits, strong, sure, ok };
+}
+
+function matchMedicines(input){
+  const words = typeof input === 'string'
+    ? ocrTokens(input).map(token => ({ token, conf: null }))
+    : scanWords(input);
+  if(!words.length) return [];
+  return state.catalog.medicines
+    .map(med => scoreMedicine(med, words))
+    .filter(r => r.ok)
+    .sort((a, b) => b.score - a.score || a.med.name.localeCompare(b.med.name));
+}
+
+/* ---- caixa de remédio ou papel escrito? ----
+   A caixa tem letra grande, maiúscula e palavras de embalagem ("genérico",
+   "comprimidos", "VENDA SOB PRESCRIÇÃO"). A receita tem muitas linhas, letra
+   miúda e palavras de consultório ("paciente", "tomar", "CRM"). */
+const SCAN_SOURCES = {
+  caixa:   { eyebrow: 'Lido na caixa',   where: 'na caixa' },
+  receita: { eyebrow: 'Lido na receita', where: 'na receita' },
+  texto:   { eyebrow: 'Lido no texto',   where: 'no texto' },
+};
+
+function classifyScanSource(reading){
+  const raw = String((reading && reading.text) || '');
+  const text = normalizeText(raw);
+  const letters = raw.replace(/[^A-Za-zÀ-ÿ]/g, '');
+  const upper = letters ? (raw.match(/[A-ZÀ-Þ]/g) || []).length / letters.length : 0;
+  const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+  const words = (reading && reading.words) || [];
+  const heights = words.map(w => w.height).filter(h => h > 0).sort((a, b) => a - b);
+  const median = heights.length ? heights[Math.floor(heights.length / 2)] : 0;
+  const tallest = heights.length ? heights[heights.length - 1] : 0;
+  const bigLetters = reading && reading.imageHeight
+    ? tallest / reading.imageHeight >= 0.11
+    : (median ? tallest / median >= 2.4 : false);
+
+  let box = 0, paper = 0;
+  if(/venda sob prescri|medicamento generico|\bgenerico\b|\bsimilar\b/.test(text)) box += 3;
+  if(/comprimid|capsul|drage|envelope|frasco|ampola|\d\s?(mg|ml|mcg|g)\b/.test(text)) box += 2;
+  if(/anvisa|registro ms|\bms\b *\d|lote|\bval\b|fabricado|laborat|industria|farmaceutic/.test(text)) box += 2;
+  if(upper >= 0.55) box += 2;
+  if(bigLetters) box += 2;
+  if(lines.length <= 4) box += 1;
+
+  const prescription = /receitu|paciente|\bcrm\b|carimbo|assinatura|posologia|uso continuo|prescrevo|consultorio|\bclinica\b|\bdr\.?a?\b/.test(text);
+  if(prescription) paper += 4;
+  if(/tomar|administrar|ao dia|de \d+ em \d+ ?h|\d+ ?x ao dia|via oral|em jejum|por \d+ dias/.test(text)) paper += 3;
+  if(lines.length >= 6) paper += 2;
+  if(upper < 0.35 && !bigLetters) paper += 2;
+  if(words.length >= 25) paper += 1;
+
+  if(prescription && paper >= box) return 'receita';
+  // Só chamamos de caixa quando a embalagem se anuncia: letra grande, maiúscula
+  // ou as palavras que só existem em rótulo. Na dúvida, "texto".
+  return (box >= 4 && box > paper) ? 'caixa' : 'texto';
+}
+
+function scanEyebrow(source, fallback = 'Lido no texto'){
+  return (SCAN_SOURCES[source] || {}).eyebrow || fallback;
 }
 
 // Primeira palavra do nome ("Dipirona Sódica 500mg" → "dipirona"): serve para
@@ -1201,9 +1418,13 @@ function bestGuessTerm(text){
   return (useful.sort((a, b) => b.length - a.length)[0] || '').trim();
 }
 
-function handleScannedText(text){
-  const clean = String(text || '').replace(/\s+/g, ' ').trim();
-  if(clean.length < 3){
+function handleScannedText(input){
+  // Aceita tanto a leitura completa quanto só o texto.
+  const reading = typeof input === 'string' ? { text: input, words: [], imageHeight: 0 } : (input || { text: '' });
+  const clean = String(reading.text || '').replace(/\s+/g, ' ').trim();
+  const quality = readingQuality(reading);
+
+  if(clean.length < 3 || !quality.words.length){
     showScanOutcome({
       tone: 'warn',
       eyebrow: 'Não deu para ler',
@@ -1214,24 +1435,46 @@ function handleScannedText(text){
     return;
   }
 
-  const matches = matchMedicines(clean);
+  // Letras embaralhadas (mirou rápido, imagem tremida, objeto qualquer):
+  // é melhor pedir outra foto do que chutar um remédio.
+  if(quality.hasConfidence && (!quality.reliable.length || quality.strongest < OCR_CONF.best)){
+    showScanOutcome({
+      tone: 'warn',
+      eyebrow: 'Leitura embaralhada',
+      title: 'As letras saíram tremidas',
+      body: 'Segure o aparelho parado por um instante, com o nome do remédio dentro da moldura e bem iluminado.',
+      buttons: [{ label: 'Ler de novo', primary: true, onClick: 'captureAndRead()' }],
+      footer: 'Prefere procurar pelo nome? <button class="link-btn" onclick="switchTab(\'home\')">Ir para a busca</button>',
+    });
+    return;
+  }
+
+  const source = classifyScanSource(reading);
+  const matches = matchMedicines(reading);
   if(matches.length){
     const best = matches[0];
+    const clear = matches.length === 1 || best.score >= matches[1].score + 2;
     // Achou com folga: mostra o remédio e o menor preço para confirmar.
-    if(matches.length === 1 || best.score >= matches[1].score + 2){
-      showScannedMedicine(best.med);
+    if(clear && best.sure){
+      showScannedMedicine(best.med, source);
       return;
     }
-    // Empate entre apresentações do mesmo remédio (500mg, 750mg, gotas…).
+    // Empate entre apresentações do mesmo remédio (500mg, 750mg, gotas…):
+    // mostra o nome e deixa a pessoa escolher a dosagem na busca.
     const tied = matches.filter(m => m.score >= best.score - 1);
     const shared = mainNameToken(best.med);
-    if(shared && tied.every(m => mainNameToken(m.med) === shared)){
-      showScannedTerm(shared, tied.map(m => m.med));
+    if(!clear && shared && tied.every(m => mainNameToken(m.med) === shared)){
+      showScannedTerm(shared, tied.map(m => m.med), source);
+      return;
+    }
+    // Leu pouco (uma pista só): pergunta antes de abrir a compra.
+    if(clear){
+      showUncertainMedicine(best.med, clean, source);
       return;
     }
     // Remédios diferentes no mesmo papel: deixa a pessoa escolher.
     showScanOutcome({
-      eyebrow: 'Mais de um remédio no texto',
+      eyebrow: `Mais de um remédio ${(SCAN_SOURCES[source] || SCAN_SOURCES.texto).where}`,
       title: 'Qual destes é o seu?',
       body: escapeHtml(`Li “${clean.slice(0, 60)}”`),
       buttons: matches.slice(0, 3).map((m, i) => ({
@@ -1245,7 +1488,7 @@ function handleScannedText(text){
   const guess = bestGuessTerm(clean);
   showScanOutcome({
     tone: 'warn',
-    eyebrow: 'Lido na caixa',
+    eyebrow: scanEyebrow(source),
     title: escapeHtml(clean.slice(0, 60)),
     body: guess
       ? 'Este remédio não está no nosso catálogo, mas você pode procurar assim mesmo.'
@@ -1320,9 +1563,10 @@ function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body =
 }
 
 // Remédio reconhecido: mostra o menor preço e leva para a comparação.
-function showScannedMedicine(med){
+function showScannedMedicine(med, source = 'caixa'){
   const { cheapest } = medPriceSummary(med);
   showScanOutcome({
+    eyebrow: scanEyebrow(source, 'Lido na caixa'),
     title: escapeHtml(med.name),
     body: escapeHtml(medSheetLine(med)),
     price: cheapest,
@@ -1331,8 +1575,25 @@ function showScannedMedicine(med){
   });
 }
 
+/* Combinou, mas com uma letra errada ou uma pista só: em vez de abrir a compra
+   do remédio errado, pergunta antes. */
+function showUncertainMedicine(med, text, source = 'texto'){
+  const { cheapest } = medPriceSummary(med);
+  showScanOutcome({
+    tone: 'warn',
+    eyebrow: 'Leitura incerta',
+    title: `${escapeHtml(med.name)}?`,
+    body: `Li “${escapeHtml(text.slice(0, 48))}” ${escapeHtml((SCAN_SOURCES[source] || SCAN_SOURCES.texto).where)}. É este remédio?`,
+    price: cheapest,
+    buttons: [
+      { label: 'Sim, ver os preços', primary: true, onClick: `scanResult('${med.id}')` },
+      { label: 'Não, ler de novo', onClick: 'captureAndRead()' },
+    ],
+  });
+}
+
 // Vários tamanhos do mesmo remédio: abre a busca com todos.
-function showScannedTerm(term, meds){
+function showScannedTerm(term, meds, source = 'caixa'){
   // A etiqueta mostra o mesmo preço que vai aparecer no topo da pesquisa, e a
   // linha conta quantas apresentações e farmácias a pesquisa realmente tem.
   const preview = searchPreview(term);
@@ -1340,6 +1601,7 @@ function showScannedTerm(term, meds){
   const cheapest = medPriceSummary(list[0]).cheapest;
   const name = term.charAt(0).toUpperCase() + term.slice(1);
   showScanOutcome({
+    eyebrow: scanEyebrow(source, 'Lido na caixa'),
     title: escapeHtml(name),
     body: [
       countLabel(list.length, 'opção', 'opções'),
