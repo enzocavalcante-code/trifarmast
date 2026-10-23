@@ -32,6 +32,7 @@ const state = {
   activeTab:'home',
   activeCat:'Todos',
   resultsLimit: RESULTS_PAGE_SIZE,
+  scanList: null,     // remédios lidos numa foto, para comparar todos de uma vez
   expandedMeds: new Set(),
   reminders:[],
   stocks:[],          // quantas unidades a pessoa tem em casa, por remédio
@@ -154,6 +155,7 @@ const CATALOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function useCatalog(catalog){
   state.catalog = catalog;
+  catalogTokensCache = null;        // o leitor da câmera usa as palavras do catálogo
   buildChips();
   if(state.user) renderResults();
 }
@@ -627,11 +629,16 @@ function setCat(cat){
 
 let searchDebounce = null;
 function onSearchInput(){
+  state.scanList = null;        // digitou: volta a ser uma busca normal
   clearTimeout(searchDebounce);
   searchDebounce = setTimeout(()=>{ state.resultsLimit = RESULTS_PAGE_SIZE; renderResults(); }, 120);
 }
 
 function filteredMeds(){
+  // Lista vinda da câmera: mostra exatamente aqueles, na ordem lida.
+  if(state.scanList && state.scanList.length){
+    return state.scanList.map(medById).filter(Boolean);
+  }
   let meds = allMeds();
   if(state.activeCat !== 'Todos') meds = meds.filter(m=>m.cat===state.activeCat);
   return medsMatchingQuery($('search-input').value, meds);
@@ -660,15 +667,27 @@ function renderResults(){
   const meds = filteredMeds();
   const shown = meds.slice(0, state.resultsLimit);
 
+  const scanning = !!(state.scanList && state.scanList.length);
   let meta = '';
-  if(meds.length){
+  if(scanning){
+    meta = `${countLabel(meds.length, 'remédio lido na foto', 'remédios lidos na foto')}
+      <button class="link-btn" onclick="clearScanList()">Limpar</button>`;
+  } else if(meds.length){
     meta = rawQuery
       ? `${meds.length} resultado${meds.length>1?'s':''} para "${escapeHtml(rawQuery)}"`
       : (state.activeCat==='Todos' ? 'Mais procurados' : escapeHtml(state.activeCat)) + ` · ${meds.length} remédios`;
   }
   $('results-meta').innerHTML = meta;
+  $('results-meta').classList.toggle('scan-meta', scanning);
 
   let html = '';
+  if(scanning){
+    const ids = meds.map(m => m.id).join(',');
+    html += `<div class="scan-batch">
+      <span>Compare cada um e escolha onde comprar. Pode levar tudo de uma vez:</span>
+      <button class="btn-outline-sm" onclick="addScannedMedicines('${ids}')">Colocar todos no carrinho</button>
+    </div>`;
+  }
   if(meds.length===0){
     html += `<div class="empty-state">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -967,7 +986,35 @@ function scanResult(medId){
 
 // Leva para a tela de compra com o remédio já pesquisado (preços por farmácia,
 // ordenados pela distância de onde a pessoa está).
+/* Compara de uma vez todos os remédios lidos na foto: a tela de busca mostra
+   um card por remédio, na ordem em que estavam na receita, cada um com os
+   preços de todas as farmácias. */
+function showScannedResults(ids){
+  const list = String(ids).split(',').map(id => id.trim()).filter(id => medById(id));
+  if(!list.length) return;
+  state.scanList = list;
+  state.activeCat = 'Todos';
+  state.resultsLimit = Math.max(RESULTS_PAGE_SIZE, list.length);
+  $('search-input').value = '';
+  hideScanOutcome();
+  buildChips();
+  switchTab('home');
+  renderResults();
+  setTimeout(()=>{
+    const results = $('results-wrap');
+    if(results) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 120);
+}
+
+function clearScanList(){
+  if(!state.scanList) return;
+  state.scanList = null;
+  state.resultsLimit = RESULTS_PAGE_SIZE;
+  renderResults();
+}
+
 function searchForTerm(term){
+  state.scanList = null;
   $('search-input').value = term;
   state.activeCat = 'Todos';
   state.resultsLimit = RESULTS_PAGE_SIZE;
@@ -1292,37 +1339,43 @@ function doseNumber(raw, allowLetters){
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function pushDose(found, value, unit, per){
+function pushDose(found, value, unit, per, at = -1){
   if(value == null) return;
-  if(per) found.push({ cls: `${unit}/${per}`, value });                   // concentração
-  else if(unit === 'g') found.push({ cls: 'mg', value: value * 1000 });
-  else if(unit === 'mg') found.push({ cls: 'mg', value });
-  else if(unit === 'mcg' || unit === 'ug') found.push({ cls: 'mg', value: value / 1000 });
-  else found.push({ cls: unit, value });                                  // ui, ml
+  if(per) found.push({ cls: `${unit}/${per}`, value, at });               // concentração
+  else if(unit === 'g') found.push({ cls: 'mg', value: value * 1000, at });
+  else if(unit === 'mg') found.push({ cls: 'mg', value, at });
+  else if(unit === 'mcg' || unit === 'ug') found.push({ cls: 'mg', value: value / 1000, at });
+  else found.push({ cls: unit, value, at });                              // ui, ml
 }
 
 /* Todas as dosagens de um texto, em miligramas quando dá para converter.
    Trabalha palavra por palavra — "500 mg", "500mg", "1 g" e "SOO mg" caem
    todas no mesmo número, e o que está no meio de uma palavra é ignorado. */
 function parseDoses(text){
-  const words = normalizeText(text)
+  const clean = normalizeText(text)
     .replace(/\bmiligramas?\b/g, 'mg').replace(/\bgramas?\b/g, 'g')
-    .replace(/\bmicrogramas?\b/g, 'mcg').replace(/\bmililitros?\b/g, 'ml')
-    .split(/\s+/).filter(Boolean);
+    .replace(/\bmicrogramas?\b/g, 'mcg').replace(/\bmililitros?\b/g, 'ml');
+  // guarda onde cada palavra está: numa receita, a dose pertence ao remédio
+  // escrito ao lado dela, não ao da linha de cima.
+  const words = [];
+  const re = /\S+/g;
+  let m;
+  while((m = re.exec(clean)) !== null) words.push({ text: m[0], at: m.index });
+
   const found = [];
   for(let i = 0; i < words.length; i++){
-    const word = words[i];
+    const word = words[i].text;
     // tudo junto: "500mg", "500mg/ml"
     const glued = word.match(/^([0-9a-z.,]+?)(mg|mcg|ug|g|ui|ml)(?:\s*\/\s*(ml|g|dose))?[.,;:]?$/);
     if(glued){
       const value = doseNumber(glued[1], glued[1].length <= 4);
-      if(value != null){ pushDose(found, value, glued[2], glued[3]); continue; }
+      if(value != null){ pushDose(found, value, glued[2], glued[3], words[i].at); continue; }
     }
     // separado: "500" + "mg"
-    const next = words[i + 1] && words[i + 1].match(UNIT_RE);
+    const next = words[i + 1] && words[i + 1].text.match(UNIT_RE);
     if(next){
       const value = doseNumber(word, true);
-      if(value != null){ pushDose(found, value, next[1], next[2]); i++; }
+      if(value != null){ pushDose(found, value, next[1], next[2], words[i].at); i++; }
     }
   }
   return found;
@@ -1334,6 +1387,46 @@ const sameDose = (a, b) => a.cls === b.cls && Math.abs(a.value - b.value) <= Mat
 function medicineDoses(med){
   if(!med.__doses) med.__doses = parseDoses(`${med.name} ${med.presentation || ''}`);
   return med.__doses;
+}
+
+/* De quem é cada dose: a palavra de remédio mais próxima no texto. Sem isso,
+   "Paracetamol 750mg, Amoxicilina 500mg" fazia o app achar que existia um
+   paracetamol de 500mg na foto. */
+let catalogTokensCache = null;
+function catalogTokens(){
+  if(catalogTokensCache && catalogTokensCache.size) return catalogTokensCache;
+  const set = new Set();
+  for(const med of (state.catalog.medicines || [])){
+    [...ocrTokens(med.name), ...ocrTokens(med.ingredient || '')].forEach(token => {
+      if(token.length >= 5 && !/\d/.test(token) && !WEAK_TOKENS.has(token)) set.add(token);
+    });
+  }
+  catalogTokensCache = set;
+  return set;
+}
+
+function assignDoseOwners(text, doses){
+  if(!doses.length) return doses;
+  const known = catalogTokens();
+  const anchors = [];
+  const re = /[a-z0-9]+/g;
+  let m;
+  while((m = re.exec(text)) !== null){
+    if(known.has(m[0])) anchors.push({ token: m[0], at: m.index });
+  }
+  if(!anchors.length) return doses;
+  for(const dose of doses){
+    if(dose.at == null || dose.at < 0) continue;
+    // o nome quase sempre vem antes da dose; se não houver, aceita logo depois
+    const before = anchors.filter(a => a.at <= dose.at).pop();
+    const after = anchors.find(a => a.at > dose.at);
+    const distBefore = before ? dose.at - before.at : Infinity;
+    const distAfter = after ? after.at - dose.at : Infinity;
+    const winner = distBefore <= 60 && distBefore <= distAfter + 12 ? before
+                 : (distAfter <= 20 ? after : before);
+    if(winner) dose.owner = winner.token;
+  }
+  return doses;
 }
 
 // Quantidade da caixa: "20 comprimidos", "30 cápsulas", "1 unidade".
@@ -1429,7 +1522,10 @@ function scoreMedicine(med, words, readDoses = [], readPack = null, readText = '
      dose cai. Só compara o que é comparável (mg com mg, UI com UI). */
   const medDoses = medicineDoses(med);
   const classes = new Set(medDoses.map(d => d.cls));
-  const comparable = readDoses.filter(r => classes.has(r.cls));
+  /* Cada dose pertence ao remédio escrito ao lado dela: numa receita com vários
+     itens, o "500mg" da amoxicilina não pode decidir qual paracetamol é o seu. */
+  const mine = dose => !dose.owner || matched.has(dose.owner);
+  const comparable = readDoses.filter(r => classes.has(r.cls) && mine(r));
   const doseMatch = comparable.some(r => medDoses.some(d => sameDose(d, r)));
   const doseConflict = comparable.length > 0 && !doseMatch;
   if(matched.size){
@@ -1456,9 +1552,9 @@ function matchMedicines(input){
   if(!words.length) return [];
   // A dosagem é lida do texto confiável, com "500" e "mg" ainda separados.
   const readText = typeof input === 'string' ? input : scanText(input);
-  const readDoses = parseDoses(readText);
-  const readPack = packSize(readText);
   const flat = normalizeText(readText).replace(/\s+/g, ' ');
+  const readDoses = assignDoseOwners(flat, parseDoses(flat));
+  const readPack = packSize(readText);
   return state.catalog.medicines
     .map(med => scoreMedicine(med, words, readDoses, readPack, flat))
     .filter(r => r.ok)
@@ -1572,6 +1668,15 @@ function handleScannedText(input){
   const source = classifyScanSource(reading);
   const matches = matchMedicines(reading);
   if(matches.length){
+    /* Uma receita costuma trazer vários remédios, e uma foto pode pegar várias
+       caixas: em vez de escolher o melhor e esquecer o resto, o app separa o
+       que achou por remédio e mostra todos, na ordem em que aparecem. */
+    const groups = groupScanMatches(matches, reading);
+    if(groups.length >= 2){
+      showScannedList(groups, source);
+      return;
+    }
+
     const best = matches[0];
     const clear = matches.length === 1 || best.score >= matches[1].score + 2;
     // Achou com folga: mostra o remédio e o menor preço para confirmar.
@@ -1590,23 +1695,91 @@ function handleScannedText(input){
       return;
     }
     // Leu pouco (uma pista só): pergunta antes de abrir a compra.
-    if(clear){
-      showUncertainMedicine(best.med, clean, source);
-      return;
-    }
-    // Remédios diferentes no mesmo papel: deixa a pessoa escolher.
-    showScanOutcome({
-      eyebrow: `Mais de um remédio ${(SCAN_SOURCES[source] || SCAN_SOURCES.texto).where}`,
-      title: 'Qual destes é o seu?',
-      buttons: matches.slice(0, 3).map((m, i) => ({
-        label: m.med.name, primary: i === 0, onClick: `scanResult('${m.med.id}')`,
-      })),
-      footer: '<button class="link-btn" onclick="captureAndRead()">Ler de novo</button>',
-    });
+    showUncertainMedicine(best.med, clean, source);
     return;
   }
 
   showNoMedicineFound(bestGuessTerm(reading));
+}
+
+/* ---- vários remédios na mesma foto ----
+   Remédios diferentes são agrupados pelo princípio ativo: "Dipirona Sódica",
+   "Novalgina" e "Dorflex" são o mesmo achado (dipirona), enquanto losartana e
+   omeprazol são dois remédios de verdade. */
+function medicineFamily(med){
+  const ingredient = ocrTokens(med.ingredient || '')
+    .find(t => t.length >= 5 && !WEAK_TOKENS.has(t) && !/\d/.test(t));
+  return ingredient || mainNameToken(med) || med.id;
+}
+
+function groupScanMatches(matches, reading){
+  const text = normalizeText(typeof reading === 'string' ? reading : scanText(reading));
+  const groups = new Map();
+  for(const match of matches){
+    const key = medicineFamily(match.med);
+    const current = groups.get(key);
+    // Dentro do mesmo remédio fica a apresentação que combinou melhor.
+    if(!current || match.score > current.score) groups.set(key, { ...match, key });
+  }
+  // Na ordem em que aparecem no papel (é assim que a receita está escrita).
+  const position = group => {
+    const tokens = [...ocrTokens(group.med.name), group.key].filter(t => t.length >= 4);
+    const found = tokens.map(t => text.indexOf(t)).filter(i => i >= 0);
+    return found.length ? Math.min(...found) : Number.MAX_SAFE_INTEGER;
+  };
+  return [...groups.values()]
+    .filter(g => g.ok && (g.sure || g.score >= 8))   // num monte de texto, só o que é sólido
+    .sort((a, b) => position(a) - position(b) || b.score - a.score);
+}
+
+// Lista com todos os remédios achados na foto, cada um com o menor preço.
+function showScannedList(groups, source = 'receita'){
+  const shown = groups.slice(0, 8);
+  const rows = shown.map(group => {
+    const med = group.med;
+    const { cheapest } = medPriceSummary(med);
+    return `
+      <button class="ss-item" onclick="scanResult('${med.id}')">
+        <span class="ssi-text">
+          <b>${escapeHtml(med.name)}</b>
+          <small>${escapeHtml(medSheetLine(med))}</small>
+        </span>
+        ${cheapest != null ? priceTagHtml(cheapest) : ''}
+      </button>`;
+  }).join('');
+
+  const ids = shown.map(g => g.med.id).join(',');
+  showScanOutcome({
+    eyebrow: scanEyebrow(source, 'Lido na receita'),
+    title: `${countLabel(groups.length, 'remédio encontrado', 'remédios encontrados')}`,
+    body: 'Toque em um para ver os preços perto de você.',
+    list: rows + (groups.length > shown.length
+      ? `<p class="ss-note">E mais ${groups.length - shown.length} que não couberam aqui.</p>` : ''),
+    buttons: [
+      { label: 'Ver os preços de todos', primary: true, onClick: `showScannedResults('${ids}')` },
+      { label: 'Colocar todos no carrinho', onClick: `addScannedMedicines('${ids}')` },
+    ],
+    footer: 'Faltou algum? <button class="link-btn" onclick="captureAndRead()">Ler de novo</button>',
+  });
+}
+
+/* Põe de uma vez todos os remédios da receita no carrinho. A farmácia é a que
+   sai mais barata com a lista inteira — é o que o carrinho já faz. */
+function addScannedMedicines(ids){
+  const meds = String(ids).split(',').map(id => medById(id.trim())).filter(Boolean);
+  if(!meds.length) return;
+  let added = 0;
+  for(const med of meds){
+    if(state.cart.items.find(i => i.medId === med.id)) continue;
+    state.cart.items.push({ medId: med.id, qty: 1 });
+    added++;
+  }
+  state.cart.pharmacyId = cheapestPharmacyForCart();
+  saveCart();
+  updateCartUI(true);
+  hideScanOutcome();
+  showToast(added ? `${added} ${added === 1 ? 'remédio' : 'remédios'} no carrinho.` : 'Os remédios já estavam no carrinho.');
+  openCart();
 }
 
 /* Uma mensagem só para "não achei remédio nenhum", venha de foto ruim, de
@@ -1669,7 +1842,7 @@ function medSheetLine(med){
 }
 
 // Resultado da leitura, numa folha branca sobre a câmera.
-function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body = '', price = null, note = '', buttons = [], footer = '' }){
+function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body = '', price = null, note = '', list = '', buttons = [], footer = '' }){
   const box = $('scan-outcome');
   if(!box) return;
   box.className = `scan-sheet ${tone}`;
@@ -1683,6 +1856,7 @@ function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body =
       ${price != null ? priceTagHtml(price) : ''}
     </div>
     ${note ? `<p class="ss-note">${escapeHtml(note)}</p>` : ''}
+    ${list ? `<div class="ss-list">${list}</div>` : ''}
     <div class="ss-actions">
       ${buttons.map(b => `<button class="${b.primary ? 'btn btn-primary' : 'btn btn-ghost'}" onclick="${b.onClick}">${escapeHtml(b.label)}</button>`).join('')}
     </div>
