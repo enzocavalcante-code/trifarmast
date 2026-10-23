@@ -327,17 +327,6 @@ input[type=search]::-webkit-search-cancel-button{cursor:pointer;}
 .chip:hover{border-color:var(--green-400); color:var(--ink);}
 .chip.active{background:var(--green-600); border-color:var(--green-600); color:#fff;}
 .results-meta{font-size:calc(12.5px * var(--fs)); font-weight:600; color:var(--ink-soft); margin:0 0 10px;}
-/* Comparando o que veio de uma foto: cabeçalho e atalho para levar tudo. */
-.results-meta.scan-meta{
-  display:flex; align-items:center; justify-content:space-between; gap:10px;
-  color:var(--accent-text); font-size:calc(13.5px * var(--fs));
-}
-.scan-batch{
-  display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-  background:var(--surface); border:1.5px dashed var(--green-300); border-radius:14px;
-  padding:12px 14px; margin-bottom:12px;
-}
-.scan-batch span{font-size:calc(13px * var(--fs)); color:var(--ink-soft); flex:1 1 180px; line-height:1.45;}
 
 .result-card{
   background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md);
@@ -1345,25 +1334,6 @@ input[type=search]::-webkit-search-cancel-button{cursor:pointer;}
   background:var(--amber-bg); border:1px solid var(--amber-line); color:var(--amber-ink);
   font-size:calc(12.5px * var(--fs));
 }
-/* Vários remédios na mesma foto: um por linha, com o menor preço de cada um. */
-.ss-list{
-  margin-top:14px; border:1px solid var(--line); border-radius:14px; overflow:auto;
-  max-height:42vh; background:var(--bg);
-}
-.ss-item{
-  display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%;
-  padding:11px 12px; border:none; border-bottom:1px solid var(--line); cursor:pointer;
-  background:transparent; font-family:inherit; color:var(--ink); text-align:left;
-}
-.ss-item:last-child{border-bottom:none;}
-.ss-item:hover{background:var(--surface-2);}
-.ss-item:active{transform:scale(.995);}
-.ssi-text{display:flex; flex-direction:column; gap:2px; min-width:0;}
-.ssi-text b{font-size:calc(14.5px * var(--fs)); line-height:1.25;}
-.ssi-text small{font-size:calc(12px * var(--fs)); color:var(--ink-soft);}
-.ss-list .ss-price small{display:none;}
-.ss-list .price-tag{padding:5px 10px 5px 8px;}
-.ss-list .price-tag .pt-val{font-size:calc(15.5px * var(--fs));}
 .ss-actions{display:flex; flex-direction:column; gap:9px; margin-top:16px;}
 .ss-actions .btn{width:100%;}
 .ss-foot{margin:12px 0 0; text-align:center; font-size:calc(13.5px * var(--fs)); color:var(--ink-soft);}
