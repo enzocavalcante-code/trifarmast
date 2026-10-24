@@ -1446,7 +1446,7 @@ function scoreMedicine(med, words, readDoses = [], readPack = null, readText = '
   // Confiante = duas pistas diferentes, a dosagem junto, ou o nome inteiro —
   // e nunca quando a dosagem lida briga com a do remédio.
   const sure = ok && strong > 0 && !doseConflict && (hits >= 2 || doseMatch || wholeName);
-  return { med, score, hits, strong, sure, ok, doseMatch, doseConflict };
+  return { med, score, hits, strong, sure, ok, doseMatch, doseConflict, tokens: [...matched] };
 }
 
 function matchMedicines(input){
@@ -1572,6 +1572,15 @@ function handleScannedText(input){
   const source = classifyScanSource(reading);
   const matches = matchMedicines(reading);
   if(matches.length){
+    /* Receita (ou foto com várias caixas) traz mais de um remédio: em vez de
+       escolher um e esquecer o resto, abre a tela de seleção com todos. */
+    const groups = groupScanMatches(matches, reading);
+    if(groups.length >= 2){
+      hideScanOutcome();
+      openScanSelection(groups, source);
+      return;
+    }
+
     const best = matches[0];
     const clear = matches.length === 1 || best.score >= matches[1].score + 2;
     // Achou com folga: mostra o remédio e o menor preço para confirmar.
@@ -1590,23 +1599,68 @@ function handleScannedText(input){
       return;
     }
     // Leu pouco (uma pista só): pergunta antes de abrir a compra.
-    if(clear){
-      showUncertainMedicine(best.med, clean, source);
-      return;
-    }
-    // Remédios diferentes no mesmo papel: deixa a pessoa escolher.
-    showScanOutcome({
-      eyebrow: `Mais de um remédio ${(SCAN_SOURCES[source] || SCAN_SOURCES.texto).where}`,
-      title: 'Qual destes é o seu?',
-      buttons: matches.slice(0, 3).map((m, i) => ({
-        label: m.med.name, primary: i === 0, onClick: `scanResult('${m.med.id}')`,
-      })),
-      footer: '<button class="link-btn" onclick="captureAndRead()">Ler de novo</button>',
-    });
+    showUncertainMedicine(best.med, clean, source);
     return;
   }
 
   showNoMedicineFound(bestGuessTerm(reading));
+}
+
+/* ---- vários remédios na mesma foto ----
+   Remédios diferentes são agrupados pelo princípio ativo: "Dipirona Sódica",
+   "Novalgina" e "Dorflex" são o mesmo achado (dipirona), enquanto losartana e
+   omeprazol são dois remédios de verdade. */
+function medicineFamily(med){
+  const ingredient = ocrTokens(med.ingredient || '')
+    .find(t => t.length >= 5 && !WEAK_TOKENS.has(t) && !/\d/.test(t));
+  return ingredient || mainNameToken(med) || med.id;
+}
+
+// A palavra que a foto realmente trouxe ("dipirona", "novalgina"): é por ela
+// que a tela de seleção monta a lista de dosagens.
+function scanReadToken(match){
+  const nameTokens = ocrTokens(match.med.name);
+  const read = (match.tokens || [])
+    .filter(t => nameTokens.includes(t) && t.length >= 5 && !WEAK_TOKENS.has(t))
+    .sort((a, b) => b.length - a.length)[0];
+  return read || medicineFamily(match.med);
+}
+
+function groupScanMatches(matches, reading){
+  const text = normalizeText(typeof reading === 'string' ? reading : scanText(reading));
+  /* Dois achados são o mesmo remédio quando dividem o princípio ativo
+     ("Dipirona" e "Novalgina") ou a palavra lida ("Dorflex" e "Dorflex Uno").
+     Só sobra um por remédio: a apresentação que melhor combinou. */
+  const groups = [];
+  for(const match of matches){
+    const read = scanReadToken(match);
+    const keys = [medicineFamily(match.med), read].filter(Boolean);
+    const related = groups.filter(g => keys.some(k => g.keys.has(k)));
+    const group = related[0] || { keys: new Set(), best: null };
+    if(!related.length) groups.push(group);
+    // Um achado pode ligar dois grupos que estavam separados: junta tudo.
+    for(const other of related.slice(1)){
+      other.keys.forEach(k => group.keys.add(k));
+      if(!group.best || (other.best && other.best.score > group.best.score)) group.best = other.best;
+      groups.splice(groups.indexOf(other), 1);
+    }
+    keys.forEach(k => group.keys.add(k));
+    if(!group.best || match.score > group.best.score) group.best = { ...match, read };
+  }
+  const list = groups
+    .map(g => ({ ...g.best, key: g.best.read || medicineFamily(g.best.med) }))
+    .filter(Boolean);
+  // Na ordem em que aparecem no papel (é assim que a receita está escrita).
+  const position = group => {
+    const tokens = [...ocrTokens(group.med.name), group.read, group.key].filter(t => t.length >= 4);
+    const found = tokens.map(t => text.indexOf(t)).filter(i => i >= 0);
+    return found.length ? Math.min(...found) : Number.MAX_SAFE_INTEGER;
+  };
+  return list
+    // Sólido = o nome foi lido inteiro e sem erro. Vale também quando a receita
+    // traz só o nome, sem dosagem ("DIPIRONA" / "LOSARTANA").
+    .filter(g => g.ok && (g.sure || (g.strong > 0 && g.score >= 6)))
+    .sort((a, b) => position(a) - position(b) || b.score - a.score);
 }
 
 /* Uma mensagem só para "não achei remédio nenhum", venha de foto ruim, de
@@ -1653,12 +1707,18 @@ function countLabel(n, one, many){
   return `${n} ${n === 1 ? one : many}`;
 }
 
-function priceTagHtml(value){
+// A etiqueta amarela sozinha (sem o "a partir de" em cima).
+function priceTagOnly(value){
   if(value == null) return '';
   const [reais, centavos] = formatBRL(value).replace(/^R\$\s*/, '').split(',');
+  return `<span class="price-tag"><span class="pt-cur">R$</span><span class="pt-val">${reais},${centavos}</span></span>`;
+}
+
+function priceTagHtml(value){
+  if(value == null) return '';
   return `<div class="ss-price">
     <small>a partir de</small>
-    <span class="price-tag"><span class="pt-cur">R$</span><span class="pt-val">${reais},${centavos}</span></span>
+    ${priceTagOnly(value)}
   </div>`;
 }
 

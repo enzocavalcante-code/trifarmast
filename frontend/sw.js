@@ -3,7 +3,7 @@
    offline. Dados (API) nunca são guardados: preço e pedido precisam ser atuais.
    Para publicar uma versão nova do site, troque o número do CACHE. */
 
-const CACHE = 'trifarmas-v1';
+const CACHE = 'trifarmas-v2';
 
 const SHELL = [
   './',
@@ -17,6 +17,7 @@ const SHELL = [
   'medicine.js',
   'cart.js',
   'orders.js',
+  'scan-select.js',
   'pwa.js',
   'farmacia.js',
   'manifest.webmanifest',
