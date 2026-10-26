@@ -154,6 +154,8 @@ const CATALOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function useCatalog(catalog){
   state.catalog = catalog;
+  catalogTokensCache = null;        // o leitor da câmera usa as palavras do catálogo
+  catalogWordsCache = null;
   buildChips();
   if(state.user) renderResults();
 }
@@ -831,15 +833,42 @@ function showScannerError(message){
 }
 
 // Tenta a câmera traseira (celular); se não houver, usa qualquer câmera.
+/* Pede a câmera traseira na maior resolução que o aparelho der: em 640×480 o
+   nome do remédio vira um borrão de poucos pixels e o leitor erra feio.
+   Se o aparelho não aceitar o pedido, vai afrouxando até a câmera simples. */
 async function requestCamera(){
-  try{
-    return await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-  }catch(error){
-    if(error && (error.name === 'OverconstrainedError' || error.name === 'NotFoundError')){
-      return navigator.mediaDevices.getUserMedia({ video: true });
+  const tries = [
+    { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 },
+      frameRate: { ideal: 30 }, focusMode: { ideal: 'continuous' } },
+    { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    { facingMode: { ideal: 'environment' } },
+    true,
+  ];
+  let lastError = null;
+  for(const video of tries){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video });
+      await sharpenCameraTrack(stream);
+      return stream;
+    }catch(error){
+      lastError = error;
+      // Permissão negada ou câmera ocupada: afrouxar não resolve.
+      if(error && (error.name === 'NotAllowedError' || error.name === 'SecurityError' || error.name === 'NotReadableError')) throw error;
     }
-    throw error;
   }
+  throw lastError || new Error('sem câmera');
+}
+
+// Foco contínuo quando o navegador deixa (ajuda muito em texto pequeno).
+async function sharpenCameraTrack(stream){
+  const track = stream.getVideoTracks()[0];
+  if(!track || typeof track.getCapabilities !== 'function') return;
+  try{
+    const caps = track.getCapabilities() || {};
+    const advanced = [];
+    if(Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) advanced.push({ focusMode: 'continuous' });
+    if(advanced.length) await track.applyConstraints({ advanced });
+  }catch{ /* o aparelho não deixa ajustar: segue com o padrão */ }
 }
 
 /* userAsked=false acontece ao abrir a aba: só liga sozinho se a permissão da
@@ -1056,25 +1085,101 @@ function guideCrop(video){
   return (crop.width >= 80 && crop.height >= 80) ? crop : full;
 }
 
-// Foto do que a câmera está vendo, em tons de cinza e com contraste reforçado
-// (a leitura fica bem melhor do que na imagem crua).
-function grabCameraFrame(){
+// Recorte cru da moldura, sem tratar: é a base das versões que vão para o leitor.
+function grabRawFrame(){
   const video = $('scanner-video');
   if(!video || !video.videoWidth) return null;
   const crop = guideCrop(video);
-  const maxWidth = 1400;
-  const scale = Math.min(2, maxWidth / crop.width);          // recorte pequeno: amplia um pouco
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(crop.width * scale);
-  canvas.height = Math.round(crop.height * scale);
+  canvas.width = Math.round(crop.width);
+  canvas.height = Math.round(crop.height);
+  canvas.getContext('2d').drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+/* Nitidez da foto (variação do Laplaciano): foto tremida tem pouca variação.
+   Serve para escolher o melhor quadro entre vários. */
+function sharpnessOf(canvas){
+  const w = Math.min(320, canvas.width);
+  const h = Math.max(1, Math.round(canvas.height * (w / canvas.width)));
+  const small = document.createElement('canvas');
+  small.width = w; small.height = h;
+  small.getContext('2d').drawImage(canvas, 0, 0, w, h);
+  const data = small.getContext('2d').getImageData(0, 0, w, h).data;
+  const gray = new Float32Array(w * h);
+  for(let i = 0, p = 0; i < data.length; i += 4, p++){
+    gray[p] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  }
+  let sum = 0, sum2 = 0, n = 0;
+  for(let y = 1; y < h - 1; y++){
+    for(let x = 1; x < w - 1; x++){
+      const p = y * w + x;
+      const lap = 4 * gray[p] - gray[p - 1] - gray[p + 1] - gray[p - w] - gray[p + w];
+      sum += lap; sum2 += lap * lap; n++;
+    }
+  }
+  if(!n) return 0;
+  return sum2 / n - (sum / n) ** 2;    // variância
+}
+
+/* Vários quadros seguidos e fica o mais nítido: a mão treme, e um quadro
+   borrado é a causa mais comum de leitura errada. */
+async function grabBestFrame(tries = 3, gapMs = 110){
+  // Logo depois de abrir a aba o vídeo ainda não tem imagem: espera um pouco
+  // em vez de dizer que a câmera está desligada.
+  const video = $('scanner-video');
+  for(let wait = 0; video && !video.videoWidth && wait < 1500; wait += 120){
+    await new Promise(done => setTimeout(done, 120));
+  }
+  let best = null, bestScore = -1;
+  for(let i = 0; i < tries; i++){
+    const frame = grabRawFrame();
+    if(frame){
+      const score = sharpnessOf(frame);
+      if(score > bestScore){ best = frame; bestScore = score; }
+    }
+    if(i < tries - 1) await new Promise(done => setTimeout(done, gapMs));
+  }
+  return best;
+}
+
+/* Prepara a foto para o leitor: amplia (letra pequena é o que mais atrapalha),
+   deixa em tons de cinza e estica o contraste pelos extremos reais da imagem,
+   em vez de um fator fixo. Com "invert", troca claro por escuro — é o que
+   salva caixa com letra branca em fundo colorido. */
+function prepareForOcr(raw, { invert = false } = {}){
+  if(!raw) return null;
+  const target = 1500;
+  const scale = Math.max(1, Math.min(3, target / raw.width));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(raw.width * scale);
+  canvas.height = Math.round(raw.height * scale);
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(raw, 0, 0, canvas.width, canvas.height);
+
   const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const data = image.data;
-  for(let i = 0; i < data.length; i += 4){
-    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    const boosted = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
-    data[i] = data[i + 1] = data[i + 2] = boosted;
+  const gray = new Uint8ClampedArray(data.length / 4);
+  const histogram = new Uint32Array(256);
+  for(let i = 0, p = 0; i < data.length; i += 4, p++){
+    const value = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    gray[p] = value;
+    histogram[Math.round(value)]++;
+  }
+  // 2% mais escuros e 2% mais claros viram preto e branco (o resto estica entre eles)
+  const cut = Math.round(gray.length * 0.02);
+  let low = 0, high = 255, count = 0;
+  for(let v = 0; v < 256; v++){ count += histogram[v]; if(count > cut){ low = v; break; } }
+  count = 0;
+  for(let v = 255; v >= 0; v--){ count += histogram[v]; if(count > cut){ high = v; break; } }
+  const span = Math.max(24, high - low);
+
+  for(let i = 0, p = 0; i < data.length; i += 4, p++){
+    let value = Math.max(0, Math.min(255, ((gray[p] - low) / span) * 255));
+    if(invert) value = 255 - value;
+    data[i] = data[i + 1] = data[i + 2] = value;
   }
   ctx.putImageData(image, 0, 0);
   return canvas;
@@ -1098,12 +1203,22 @@ async function captureAndRead(){
   if(ocrRunning) return;
   if(!state.catalog.medicines.length){ showToast('O catálogo ainda está carregando. Tente em instantes.'); return; }
 
-  const canvas = grabCameraFrame();
+  // Já marca como ocupado antes de tirar as fotos: entre o toque e a leitura
+  // passam algumas centenas de milissegundos, e um segundo toque aí começaria
+  // outra leitura por cima desta.
+  ocrRunning = true;
+  setScanBusy(true);
+  setScanProgress(0.05, 'Segure firme…');
+  let canvas = null;
+  try{ canvas = await grabBestFrame(); }catch{ canvas = null; }
   if(!canvas){
+    ocrRunning = false;
+    setScanBusy(false);
+    hideScanProgress();
     showToast('Ligue a câmera (ou envie uma foto) para eu ler o nome do remédio.');
     return;
   }
-  await readImage(canvas);
+  await readImage(canvas);   // segue ocupado até o fim da leitura
 }
 
 /* Mesma leitura, a partir de uma foto escolhida no aparelho. */
@@ -1120,7 +1235,15 @@ async function readPhoto(input){
       img.onerror = () => reject(new Error('não consegui abrir a foto'));
       img.src = url;
     });
-    await readImage(image);
+    // Vira tela de desenho para receber o mesmo tratamento do quadro da câmera
+    // (contraste, ampliação e, se precisar, cores trocadas).
+    const maxSide = 2000;
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round((image.naturalWidth || image.width) * scale);
+    canvas.height = Math.round((image.naturalHeight || image.height) * scale);
+    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+    await readImage(canvas);
   }catch(e){
     showToast(e.message);
   }finally{
@@ -1128,22 +1251,92 @@ async function readPhoto(input){
   }
 }
 
+/* Modos de leitura do Tesseract, do mais provável ao menos provável:
+   6 = um bloco de texto (caixa de remédio, receita impressa)
+   4 = uma coluna com tamanhos de letra diferentes (receita com várias linhas)
+   11 = texto esparso, sem ordem (nome solto no meio de desenhos da embalagem) */
+const OCR_MODES = [6, 4, 11];
+
+async function setOcrMode(worker, psm){
+  if(!worker || typeof worker.setParameters !== 'function') return;
+  try{
+    await worker.setParameters({
+      tessedit_pageseg_mode: String(psm),
+      preserve_interword_spaces: '1',
+      // Sem isto o Tesseract "chuta" a resolução da foto e lê pior.
+      user_defined_dpi: '300',
+    });
+  }catch{ /* versão do leitor sem esses ajustes */ }
+}
+
+// Quão boa foi uma leitura: achou remédio com certeza > achou algum > só letras.
+function gradeReading(reading){
+  if(!reading) return { score: -1 };
+  const quality = readingQuality(reading);
+  const matches = matchMedicines(reading);
+  const best = matches[0];
+  const strongest = quality.strongest || 0;
+  let score = 0;
+  if(best && best.sure) score = 400 + best.score;
+  else if(best) score = 200 + best.score;
+  else score = Math.min(150, quality.reliable.length * 10 + strongest);
+  return { score, matched: !!best, sure: !!(best && best.sure), reading };
+}
+
+/* Uma foto, várias tentativas: o leitor erra bastante quando o modo de página
+   não combina com o que está na frente da câmera, ou quando a embalagem tem
+   letra clara em fundo escuro. Vai tentando e fica com a melhor leitura —
+   e para assim que uma delas reconhece o remédio com segurança. */
+// Enquanto lê, o botão fica ocupado: antes o toque era ignorado em silêncio.
+function setScanBusy(busy){
+  const button = document.querySelector('.scanner-actions .btn-primary');
+  if(button){
+    button.disabled = busy;
+    button.setAttribute('aria-busy', busy ? 'true' : 'false');
+  }
+  const photo = document.querySelector('.scan-aux label');
+  if(photo) photo.classList.toggle('busy', busy);
+}
+
 async function readImage(source){
   ocrRunning = true;
+  setScanBusy(true);
   hideScanOutcome();
   setScanProgress(0.05, 'Preparando o leitor…');
   try{
     const worker = await getOcrWorker(setScanProgress);
-    // "blocks" traz cada palavra com a confiança e o tamanho das letras: é o que
-    // permite jogar fora leitura embaralhada e saber se é caixa ou papel escrito.
-    const result = await worker.recognize(source, {}, { text: true, blocks: true });
+    const raw = source;
+    const attempts = [
+      { psm: OCR_MODES[0], invert: false, label: 'Lendo o que está escrito…' },
+      { psm: OCR_MODES[1], invert: false, label: 'Tentando outro enquadramento…' },
+      { psm: OCR_MODES[0], invert: true,  label: 'Tentando com as cores trocadas…' },
+      { psm: OCR_MODES[2], invert: false, label: 'Procurando o nome na embalagem…' },
+    ];
+
+    let best = { score: -1 };
+    for(let i = 0; i < attempts.length; i++){
+      const attempt = attempts[i];
+      setScanProgress(0.4 + (i / attempts.length) * 0.5, attempt.label);
+      // A foto enviada do aparelho já vem pronta; só o quadro da câmera é tratado.
+      const image = raw instanceof HTMLCanvasElement ? prepareForOcr(raw, { invert: attempt.invert }) : raw;
+      if(!image || (attempt.invert && !(raw instanceof HTMLCanvasElement))) continue;
+      await setOcrMode(worker, attempt.psm);
+      // "blocks" traz cada palavra com a confiança e o tamanho das letras: é o que
+      // permite jogar fora leitura embaralhada e saber se é caixa ou papel escrito.
+      const result = await worker.recognize(image, {}, { text: true, blocks: true });
+      const graded = gradeReading(buildReading(result && result.data, image));
+      if(graded.score > best.score) best = graded;
+      if(best.sure) break;                       // achou com segurança: não precisa insistir
+    }
+
     hideScanProgress();
-    handleScannedText(buildReading(result && result.data, source));
+    handleScannedText(best.reading || { text: '', words: [], imageHeight: 0 });
   }catch(error){
     hideScanProgress();
     showScanReadError(error);
   }finally{
     ocrRunning = false;
+    setScanBusy(false);
   }
 }
 
@@ -1254,7 +1447,24 @@ function scanWords(reading){
   const source = quality.reliable.length ? quality.reliable : quality.words;
   source.forEach(w => ocrTokens(w.text).forEach(token => list.push({ token, conf: w.conf })));
   if(!list.length) ocrTokens(reading.text || '').forEach(token => list.push({ token, conf: null }));
-  return mergeDoseTokens(list);
+  return glueBrokenWords(mergeDoseTokens(list));
+}
+
+/* O leitor às vezes parte um nome no meio ("DIPI RONA", "PARA CETAMOL"):
+   junta cada par de pedaços vizinhos como uma palavra a mais, sem tirar as
+   originais. Só pedaços curtos, para não inventar nome colando duas palavras
+   inteiras. */
+function glueBrokenWords(list){
+  const out = [...list];
+  for(let i = 0; i < list.length - 1; i++){
+    const a = list[i], b = list[i + 1];
+    if(!/^[a-z]{2,6}$/.test(a.token) || !/^[a-z]{2,8}$/.test(b.token)) continue;
+    const glued = a.token + b.token;
+    if(glued.length < 6 || glued.length > 16) continue;
+    const confs = [a.conf, b.conf].filter(c => c != null);
+    out.push({ token: glued, conf: confs.length ? Math.min(...confs) : null });
+  }
+  return out;
 }
 
 // O leitor entrega "500" e "mg" separados; o catálogo guarda "500mg".
@@ -1292,40 +1502,107 @@ function doseNumber(raw, allowLetters){
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function pushDose(found, value, unit, per){
+function pushDose(found, value, unit, per, at = -1){
   if(value == null) return;
-  if(per) found.push({ cls: `${unit}/${per}`, value });                   // concentração
-  else if(unit === 'g') found.push({ cls: 'mg', value: value * 1000 });
-  else if(unit === 'mg') found.push({ cls: 'mg', value });
-  else if(unit === 'mcg' || unit === 'ug') found.push({ cls: 'mg', value: value / 1000 });
-  else found.push({ cls: unit, value });                                  // ui, ml
+  if(per) found.push({ cls: `${unit}/${per}`, value, at });               // concentração
+  else if(unit === 'g') found.push({ cls: 'mg', value: value * 1000, at });
+  else if(unit === 'mg') found.push({ cls: 'mg', value, at });
+  else if(unit === 'mcg' || unit === 'ug') found.push({ cls: 'mg', value: value / 1000, at });
+  else found.push({ cls: unit, value, at });                              // ui, ml
 }
 
 /* Todas as dosagens de um texto, em miligramas quando dá para converter.
    Trabalha palavra por palavra — "500 mg", "500mg", "1 g" e "SOO mg" caem
    todas no mesmo número, e o que está no meio de uma palavra é ignorado. */
 function parseDoses(text){
-  const words = normalizeText(text)
+  const clean = normalizeText(text)
     .replace(/\bmiligramas?\b/g, 'mg').replace(/\bgramas?\b/g, 'g')
-    .replace(/\bmicrogramas?\b/g, 'mcg').replace(/\bmililitros?\b/g, 'ml')
-    .split(/\s+/).filter(Boolean);
+    .replace(/\bmicrogramas?\b/g, 'mcg').replace(/\bmililitros?\b/g, 'ml');
+  // guarda onde cada palavra está: numa receita, a dose pertence ao remédio
+  // escrito ao lado dela, não ao da linha de cima.
+  const words = [];
+  const finder = /\S+/g;
+  let piece;
+  while((piece = finder.exec(clean)) !== null) words.push({ text: piece[0], at: piece.index });
+
   const found = [];
   for(let i = 0; i < words.length; i++){
-    const word = words[i];
+    const word = words[i].text;
     // tudo junto: "500mg", "500mg/ml"
     const glued = word.match(/^([0-9a-z.,]+?)(mg|mcg|ug|g|ui|ml)(?:\s*\/\s*(ml|g|dose))?[.,;:]?$/);
     if(glued){
       const value = doseNumber(glued[1], glued[1].length <= 4);
-      if(value != null){ pushDose(found, value, glued[2], glued[3]); continue; }
+      if(value != null){ pushDose(found, value, glued[2], glued[3], words[i].at); continue; }
+    }
+    // grudado no nome: "dipirona500mg" (o leitor junta tudo de vez em quando)
+    const tail = word.match(/(\d[\d.,]*)(mg|mcg|ug|g|ui|ml)(?:\s*\/\s*(ml|g|dose))?[.,;:]?$/);
+    if(tail){
+      const value = doseNumber(tail[1], false);
+      if(value != null){ pushDose(found, value, tail[2], tail[3], words[i].at); continue; }
     }
     // separado: "500" + "mg"
-    const next = words[i + 1] && words[i + 1].match(UNIT_RE);
+    const next = words[i + 1] && words[i + 1].text.match(UNIT_RE);
     if(next){
       const value = doseNumber(word, true);
-      if(value != null){ pushDose(found, value, next[1], next[2]); i++; }
+      if(value != null){ pushDose(found, value, next[1], next[2], words[i].at); i++; }
     }
   }
   return found;
+}
+
+/* De quem é cada dose: a palavra de remédio mais próxima no texto. Sem isso,
+   "Paracetamol 750mg, Amoxicilina 500mg" fazia o app achar que existia um
+   paracetamol de 500mg na foto. */
+let catalogWordsCache = null;
+// Todas as palavras que aparecem em nome ou princípio ativo, inclusive as
+// genéricas: serve para saber se um pedaço grudado é mesmo palavra de remédio.
+function catalogWords(){
+  if(catalogWordsCache && catalogWordsCache.size) return catalogWordsCache;
+  const set = new Set();
+  for(const med of (state.catalog.medicines || [])){
+    [...ocrTokens(med.name), ...ocrTokens(med.ingredient || '')].forEach(token => {
+      if(token.length >= 4 && !/\d/.test(token)) set.add(token);
+    });
+  }
+  catalogWordsCache = set;
+  return set;
+}
+
+let catalogTokensCache = null;
+function catalogTokens(){
+  if(catalogTokensCache && catalogTokensCache.size) return catalogTokensCache;
+  const set = new Set();
+  for(const med of (state.catalog.medicines || [])){
+    [...ocrTokens(med.name), ...ocrTokens(med.ingredient || '')].forEach(token => {
+      if(token.length >= 5 && !/\d/.test(token) && !WEAK_TOKENS.has(token)) set.add(token);
+    });
+  }
+  catalogTokensCache = set;
+  return set;
+}
+
+function assignDoseOwners(text, doses){
+  if(!doses.length) return doses;
+  const known = catalogTokens();
+  const anchors = [];
+  const finder = /[a-z0-9]+/g;
+  let piece;
+  while((piece = finder.exec(text)) !== null){
+    if(known.has(piece[0])) anchors.push({ token: piece[0], at: piece.index });
+  }
+  if(!anchors.length) return doses;
+  for(const dose of doses){
+    if(dose.at == null || dose.at < 0) continue;
+    // o nome quase sempre vem antes da dose; se não houver, aceita logo depois
+    const before = anchors.filter(a => a.at <= dose.at).pop();
+    const after = anchors.find(a => a.at > dose.at);
+    const distBefore = before ? dose.at - before.at : Infinity;
+    const distAfter = after ? after.at - dose.at : Infinity;
+    const winner = distBefore <= 60 && distBefore <= distAfter + 12 ? before
+                 : (distAfter <= 20 ? after : before);
+    if(winner) dose.owner = winner.token;
+  }
+  return doses;
 }
 
 const sameDose = (a, b) => a.cls === b.cls && Math.abs(a.value - b.value) <= Math.max(a.value, b.value) * 0.02;
@@ -1368,9 +1645,24 @@ function tokenHit(token, words){
       if(word.conf == null || word.conf >= OCR_CONF.exact) return { kind: 'exact', conf: word.conf };
       continue;
     }
+    /* O nome veio grudado em outra coisa ("dipirona500mg", "dipironasodica"):
+       vale como leitura exata. Mas só quando o que sobra é uma dosagem ou
+       outra palavra do catálogo — senão "dexcetoprofeno" viraria cetoprofeno,
+       que é outro remédio. */
+    if(token.length >= 6 && word.token.length > token.length
+       && (word.token.startsWith(token) || word.token.endsWith(token))
+       && (word.conf == null || word.conf >= OCR_CONF.exact)){
+      const rest = word.token.startsWith(token)
+        ? word.token.slice(token.length)
+        : word.token.slice(0, word.token.length - token.length);
+      if(/^\d+(mg|mcg|ug|g|ml|ui)?$/.test(rest) || catalogWords().has(rest)){
+        return { kind: 'exact', conf: word.conf };
+      }
+    }
     // Uma letra errada só é aceita em palavra comprida e bem lida.
-    if(token.length >= 7 && Math.abs(word.token.length - token.length) <= 1
-       && editDistance(word.token, token) <= 1
+    const slack = token.length >= 9 ? 2 : 1;
+    if(token.length >= 6 && Math.abs(word.token.length - token.length) <= slack
+       && editDistance(word.token, token) <= slack
        && (word.conf == null || word.conf >= OCR_CONF.fuzzy)){
       if(!best || (word.conf || 0) > (best.conf || 0)) best = { kind: 'fuzzy', conf: word.conf };
     }
@@ -1429,7 +1721,10 @@ function scoreMedicine(med, words, readDoses = [], readPack = null, readText = '
      dose cai. Só compara o que é comparável (mg com mg, UI com UI). */
   const medDoses = medicineDoses(med);
   const classes = new Set(medDoses.map(d => d.cls));
-  const comparable = readDoses.filter(r => classes.has(r.cls));
+  /* Cada dose pertence ao remédio escrito ao lado dela: numa receita com vários
+     itens, o "500mg" da amoxicilina não pode decidir qual paracetamol é o seu. */
+  const mine = dose => !dose.owner || matched.has(dose.owner);
+  const comparable = readDoses.filter(r => classes.has(r.cls) && mine(r));
   const doseMatch = comparable.some(r => medDoses.some(d => sameDose(d, r)));
   const doseConflict = comparable.length > 0 && !doseMatch;
   if(matched.size){
@@ -1442,7 +1737,10 @@ function scoreMedicine(med, words, readDoses = [], readPack = null, readText = '
   const hits = matched.size, strong = strongTokens.size;
   // O nome do remédio é uma palavra só ("Dorflex", "Yasmin") e ela foi lida inteira.
   const wholeName = wordTokens.length === 1 && nameHits === 1 && strong > 0;
-  const ok = hits > 0 && (hits >= 2 || strong > 0) && score >= 4;
+  /* Aceita também o nome quase certo com a dosagem batendo: "PARACETAMQL
+     750mg" é um L lido como Q, não outro remédio. Nesse caso o app pergunta
+     antes de abrir a compra (sure continua falso). */
+  const ok = hits > 0 && (hits >= 2 || strong > 0 || (doseMatch && score >= 6)) && score >= 4;
   // Confiante = duas pistas diferentes, a dosagem junto, ou o nome inteiro —
   // e nunca quando a dosagem lida briga com a do remédio.
   const sure = ok && strong > 0 && !doseConflict && (hits >= 2 || doseMatch || wholeName);
@@ -1451,14 +1749,14 @@ function scoreMedicine(med, words, readDoses = [], readPack = null, readText = '
 
 function matchMedicines(input){
   const words = typeof input === 'string'
-    ? ocrTokens(input).map(token => ({ token, conf: null }))
+    ? glueBrokenWords(mergeDoseTokens(ocrTokens(input).map(token => ({ token, conf: null }))))
     : scanWords(input);
   if(!words.length) return [];
   // A dosagem é lida do texto confiável, com "500" e "mg" ainda separados.
   const readText = typeof input === 'string' ? input : scanText(input);
-  const readDoses = parseDoses(readText);
-  const readPack = packSize(readText);
   const flat = normalizeText(readText).replace(/\s+/g, ' ');
+  const readDoses = assignDoseOwners(flat, parseDoses(flat));
+  const readPack = packSize(readText);
   return state.catalog.medicines
     .map(med => scoreMedicine(med, words, readDoses, readPack, flat))
     .filter(r => r.ok)

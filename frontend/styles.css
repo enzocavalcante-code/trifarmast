@@ -1450,3 +1450,5 @@ input[type=search]::-webkit-search-cancel-button{cursor:pointer;}
 .scan-opt-price .price-tag .pt-val{font-size:calc(15.5px * var(--fs));}
 .scan-opt-price .price-tag .pt-cur{font-size:calc(10.5px * var(--fs)); transform:translateY(-2px);}
 .scan-opt-price small{margin-top:3px;}
+.scan-aux label.busy{opacity:.5; pointer-events:none;}
+.scan-shoot[aria-busy="true"]{opacity:.7;}
