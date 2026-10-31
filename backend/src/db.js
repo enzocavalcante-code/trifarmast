@@ -35,4 +35,4 @@ async function migrate() {
   await transaction(client => seed(client, hashPassword));
 }
 
-module.exports = { pool, query, transaction, migrate };
+module.exports = { query, transaction, migrate };

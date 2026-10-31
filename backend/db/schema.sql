@@ -97,6 +97,9 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_name             TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_vehicle          TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_plate            TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_rating           NUMERIC(2,1);
+-- Retirada confirmada no balcão da farmácia (frontend/farmacia.html).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_validated_at      TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_validated_by      TEXT;
 CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS order_items (

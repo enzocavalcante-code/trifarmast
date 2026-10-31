@@ -4,6 +4,7 @@ const config = require('../config');
 const { query, transaction } = require('../db');
 const { hashPassword, checkPassword, signToken } = require('../auth');
 const { HttpError, asyncHandler } = require('../errors');
+const { rateLimit, clearLimit } = require('../security');
 const { isValidAvatar } = require('../images');
 const serialize = require('../serializers');
 const { loadAccountData } = require('../account');
@@ -15,6 +16,14 @@ const initialsAvatar = (seed, color) =>
   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed)}&backgroundColor=${color}&textColor=ffffff`;
 
 const normalizeEmail = email => String(email || '').trim().toLowerCase();
+const looksLikeEmail = email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+// Trava tentativas de senha por e-mail+IP; um login certo zera a contagem.
+const limitLogin = rateLimit({
+  name: 'login', windowMs: 15 * 60 * 1000, max: 8,
+  by: req => normalizeEmail(req.body && req.body.email),
+  message: 'Muitas tentativas de senha. Aguarde alguns minutos e tente de novo.',
+});
 
 // Foto do Google em tamanho maior (o padrão vem com 96px).
 const largeGooglePhoto = url => (url ? url.replace(/=s\d+(-c)?$/, '=s256-c') : null);
@@ -90,7 +99,7 @@ async function upsertGoogleUser({ name, email, picture }) {
   return { row, isNewUser: true };
 }
 
-router.post('/login', asyncHandler(async (req, res) => {
+router.post('/login', limitLogin, asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || '');
   if (!email || !password) throw new HttpError(400, 'Preencha e-mail e senha para continuar.');
@@ -103,6 +112,7 @@ router.post('/login', asyncHandler(async (req, res) => {
   if (!user || !(await checkPassword(password, user.password_hash))) {
     throw new HttpError(401, 'E-mail ou senha incorretos.');
   }
+  clearLimit('login', req, email);   // senha certa: a pessoa não fica presa no limite
   await sendSession(res, user, false);
 }));
 
@@ -111,6 +121,7 @@ router.post('/signup', asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || '');
   if (!name || !email || !password) throw new HttpError(400, 'Preencha todos os campos.');
+  if (!looksLikeEmail(email)) throw new HttpError(400, 'Digite um e-mail válido.');
   if (password.length < 6) throw new HttpError(400, 'A senha precisa ter pelo menos 6 caracteres.');
 
   const exists = await query('SELECT 1 FROM users WHERE email = $1', [email]);

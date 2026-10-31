@@ -1487,7 +1487,10 @@ function mergeDoseTokens(list){
 
 // Letras que o leitor troca por número quando está lendo uma dosagem ("SOO mg").
 const DIGIT_LOOKALIKE = { o: '0', q: '0', l: '1', i: '1', s: '5', b: '8', z: '2' };
-const UNIT_RE = /^(mg|mcg|ug|g|ui|ml)(?:\s*\/\s*(ml|g|dose))?[.,;:]?$/;
+// A câmera erra a unidade de jeitos conhecidos: "m" vira "rn" e "g" vira "q".
+// Só trocamos quando vem logo depois de um número, para não mexer em nomes.
+const UNIT_FIX = /(\d\s*)(rng|rnq|nng|mq|rng?s)\b/g;
+const UNIT_RE = /^(mg|mcg|ug|g|ui|ml)s?(?:\s*\/\s*(\d+(?:[.,]\d+)?)?\s*(ml|g|dose))?[^a-z0-9]*$/;
 
 // "SOO" → "500", mas só em pedaço curto que vai antes de uma unidade: assim
 // "paracetamol" nunca vira número.
@@ -1502,9 +1505,13 @@ function doseNumber(raw, allowLetters){
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function pushDose(found, value, unit, per, at = -1){
+function pushDose(found, value, unit, per, at = -1, perQty = null){
   if(value == null) return;
-  if(per) found.push({ cls: `${unit}/${per}`, value, at });               // concentração
+  if(per){
+    // concentração: "250mg/5ml" e "50mg/ml" viram a mesma conta (mg por ml)
+    const porUnidade = perQty && perQty > 0 ? value / perQty : value;
+    found.push({ cls: `${unit}/${per}`, value: porUnidade, at });
+  }
   else if(unit === 'g') found.push({ cls: 'mg', value: value * 1000, at });
   else if(unit === 'mg') found.push({ cls: 'mg', value, at });
   else if(unit === 'mcg' || unit === 'ug') found.push({ cls: 'mg', value: value / 1000, at });
@@ -1515,9 +1522,19 @@ function pushDose(found, value, unit, per, at = -1){
    Trabalha palavra por palavra — "500 mg", "500mg", "1 g" e "SOO mg" caem
    todas no mesmo número, e o que está no meio de uma palavra é ignorado. */
 function parseDoses(text){
-  const clean = normalizeText(text)
+  let clean = normalizeText(text)
     .replace(/\bmiligramas?\b/g, 'mg').replace(/\bgramas?\b/g, 'g')
-    .replace(/\bmicrogramas?\b/g, 'mcg').replace(/\bmililitros?\b/g, 'ml');
+    .replace(/\bmicrogramas?\b/g, 'mcg').replace(/\bmililitros?\b/g, 'ml')
+    .replace(UNIT_FIX, '$1mg').replace(/(\d\s*)rnl\b/g, '$1ml')
+    // concentração com espaços: "250 mg / 5 ml" vira "250mg/5ml"
+    .replace(/(\d[\d.,]*)\s*(mg|mcg|ug|g|ui|ml)\s*\/\s*(\d+(?:[.,]\d+)?)?\s*(ml|g|dose)\b/g,
+             (_, n, u, q, p) => `${n}${u}/${q || ''}${p}`);
+  // número partido pelo leitor: "50 0 mg" é 500 mg (só junta se vier unidade depois)
+  for(let n = 0; n < 3; n++){
+    const antes = clean;
+    clean = clean.replace(/(\d)\s+(\d{1,3})(?=\s*(?:mg|mcg|ug|g|ui|ml)\b)/g, '$1$2');
+    if(clean === antes) break;
+  }
   // guarda onde cada palavra está: numa receita, a dose pertence ao remédio
   // escrito ao lado dela, não ao da linha de cima.
   const words = [];
@@ -1529,22 +1546,22 @@ function parseDoses(text){
   for(let i = 0; i < words.length; i++){
     const word = words[i].text;
     // tudo junto: "500mg", "500mg/ml"
-    const glued = word.match(/^([0-9a-z.,]+?)(mg|mcg|ug|g|ui|ml)(?:\s*\/\s*(ml|g|dose))?[.,;:]?$/);
+    const glued = word.match(/^([0-9a-z.,]+?)(mg|mcg|ug|g|ui|ml)s?(?:\s*\/\s*(\d+(?:[.,]\d+)?)?\s*(ml|g|dose))?[^a-z0-9]*$/);
     if(glued){
       const value = doseNumber(glued[1], glued[1].length <= 4);
-      if(value != null){ pushDose(found, value, glued[2], glued[3], words[i].at); continue; }
+      if(value != null){ pushDose(found, value, glued[2], glued[4], words[i].at, doseNumber(glued[3], false)); continue; }
     }
     // grudado no nome: "dipirona500mg" (o leitor junta tudo de vez em quando)
-    const tail = word.match(/(\d[\d.,]*)(mg|mcg|ug|g|ui|ml)(?:\s*\/\s*(ml|g|dose))?[.,;:]?$/);
+    const tail = word.match(/(\d[\d.,]*)(mg|mcg|ug|g|ui|ml)s?(?:\s*\/\s*(\d+(?:[.,]\d+)?)?\s*(ml|g|dose))?(?![a-z0-9])/);
     if(tail){
       const value = doseNumber(tail[1], false);
-      if(value != null){ pushDose(found, value, tail[2], tail[3], words[i].at); continue; }
+      if(value != null){ pushDose(found, value, tail[2], tail[4], words[i].at, doseNumber(tail[3], false)); continue; }
     }
     // separado: "500" + "mg"
     const next = words[i + 1] && words[i + 1].text.match(UNIT_RE);
     if(next){
       const value = doseNumber(word, true);
-      if(value != null){ pushDose(found, value, next[1], next[2], words[i].at); i++; }
+      if(value != null){ pushDose(found, value, next[1], next[3], words[i].at, doseNumber(next[2], false)); i++; }
     }
   }
   return found;
@@ -1668,11 +1685,6 @@ function tokenHit(token, words){
     }
   }
   return best;
-}
-
-// Mantida para quem só tem o texto (testes e leitores sem confiança).
-function tokenInText(token, textTokens){
-  return !!tokenHit(token, textTokens.map(t => ({ token: t, conf: null })));
 }
 
 /* Procura no catálogo o remédio que combina com a leitura. Para um remédio ser
