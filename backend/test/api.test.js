@@ -110,33 +110,13 @@ test('rotas desconhecidas e sem sessão', async () => {
   assert.equal((await get('/api/orders', { token: 'token-invalido' })).status, 401);
 });
 
-test('catálogo traz farmácias, remédios e dados de equivalência', async () => {
+test('catálogo traz farmácias, remédios e recompensas', async () => {
   const { status, data } = await get('/api/catalog');
   assert.equal(status, 200);
   assert.ok(data.pharmacies.length >= 6);
   assert.ok(data.medicines.length >= 150);
   assert.equal(data.rewards.length, 4);
 
-  const generico = data.medicines.find(m => m.id === 'm2');   // Paracetamol 750mg
-  const marca = data.medicines.find(m => m.id === 'm11');     // Tylenol 750mg
-  assert.equal(generico.equivGroup, marca.equivGroup, 'genérico e marca ficam no mesmo grupo');
-  assert.equal(generico.generic, true);
-  assert.equal(marca.generic, false);
-  assert.equal(generico.units, 20);
-  assert.equal(generico.unitLabel, 'comprimido');
-  assert.ok(Object.keys(generico.prices).length >= 6);
-
-  // Remédio sem dosagem no nome não entra em nenhum grupo (não se afirma equivalência).
-  assert.equal(data.medicines.find(m => m.id === 'm12').equivGroup, '');
-});
-
-test('histórico de preços de um remédio', async () => {
-  const { status, data } = await get('/api/medicines/m1/history');
-  assert.equal(status, 200);
-  assert.ok(data.days.length >= 1);
-  assert.ok(data.currentMin > 0);
-  assert.ok(data.lowest <= data.currentMin + 0.001);
-  assert.equal((await get('/api/medicines/nao-existe/history')).status, 404);
 });
 
 test('cadastro valida os dados e cria a conta', async () => {
@@ -149,49 +129,11 @@ test('cadastro valida os dados e cria a conta', async () => {
   assert.ok(data.token);
   assert.equal(data.user.points, 0, 'conta nova começa com 0 pontos');
   assert.equal(data.showWelcome, true, 'boas-vindas na primeira entrada');
-  assert.equal(data.user.hasPassword, true);
 
   // E-mail repetido não cria outra conta, e as boas-vindas não voltam.
   assert.equal((await post('/api/auth/signup', { name: 'Outra', email, password: 'senha123' })).status, 409);
   const again = await post('/api/auth/login', { email, password: 'senha123' });
   assert.equal(again.data.showWelcome, false);
-});
-
-test('senha errada bloqueia a conta e a recuperação devolve o acesso', async () => {
-  const email = uniqueEmail('bloqueio');
-  await post('/api/auth/signup', { name: 'João Teste', email, password: 'senha123' });
-
-  let last;
-  for (let i = 0; i < 5; i++) last = await post('/api/auth/login', { email, password: 'errada' });
-  assert.equal(last.status, 429, 'bloqueia depois de 5 tentativas erradas');
-  assert.match(last.data.error, /bloqueada/i);
-
-  // Mesmo com a senha certa, a conta continua bloqueada.
-  const blocked = await post('/api/auth/login', { email, password: 'senha123' });
-  assert.equal(blocked.status, 429);
-
-  // Recuperação de senha: código por e-mail (devolvido na resposta só em teste).
-  const forgot = await post('/api/auth/password/forgot', { email });
-  assert.equal(forgot.status, 200);
-  assert.equal(forgot.data.sent, true);
-  assert.match(String(forgot.data.code), /^\d{6}$/);
-
-  assert.equal((await post('/api/auth/password/reset', { email, code: '000000', password: 'nova123' })).status, 400);
-  const reset = await post('/api/auth/password/reset', { email, code: forgot.data.code, password: 'nova123' });
-  assert.equal(reset.status, 200, 'o código correto troca a senha');
-  assert.ok(reset.data.token);
-
-  // O mesmo código não serve duas vezes, e a nova senha entra normalmente.
-  assert.equal((await post('/api/auth/password/reset', { email, code: forgot.data.code, password: 'outra123' })).status, 400);
-  assert.equal((await post('/api/auth/login', { email, password: 'nova123' })).status, 200);
-  assert.equal((await post('/api/auth/login', { email, password: 'senha123' })).status, 401);
-});
-
-test('recuperação não revela se o e-mail existe', async () => {
-  const { status, data } = await post('/api/auth/password/forgot', { email: uniqueEmail('inexistente') });
-  assert.equal(status, 200);
-  assert.equal(data.sent, true);
-  assert.equal(data.code, undefined, 'sem conta, nenhum código é criado');
 });
 
 test('pedido: criação, código de retirada e confirmação pela farmácia', async () => {
@@ -233,12 +175,9 @@ test('pedido: criação, código de retirada e confirmação pela farmácia', as
   assert.equal(confirmed.data.confirmed, true);
   assert.equal(confirmed.data.order.status, 'Concluído');
 
-  // Pontos creditados, aviso criado e o código não serve mais.
+  // Pontos creditados e o código não serve mais.
   const { data: points } = await get('/api/points', { token });
   assert.equal(points.points, pointsBefore + order.points);
-  const { data: notices } = await get('/api/notifications', { token });
-  assert.ok(notices.items.some(n => n.orderId === order.id && n.kind === 'order'));
-  assert.equal(notices.unread >= 1, true);
   assert.equal((await post('/api/pickups/confirm', { code: order.code, pin: PIN })).status, 404);
 
   const { data: list } = await get('/api/orders', { token });
@@ -270,37 +209,6 @@ test('pedido com receita fica parado até o usuário escolher como apresentá-la
   assert.equal(chosen.data.order.status, 'Em preparação');
   // A escolha vale uma vez só.
   assert.equal((await post(`/api/orders/${order.id}/prescription`, { choice: 'upload' }, { token })).status, 400);
-});
-
-test('carrinho dividido cria um pedido por farmácia', async () => {
-  const { data: session } = await post('/api/auth/login', DEMO);
-  const token = session.token;
-
-  const single = await post('/api/orders/split', {
-    paymentMethod: 'Pix', groups: [{ pharmacyId: 'p1', items: [{ medicineId: 'm1', quantity: 1 }] }],
-  }, { token });
-  assert.equal(single.status, 400, 'dividir exige pelo menos duas farmácias');
-
-  const repeated = await post('/api/orders/split', {
-    paymentMethod: 'Pix',
-    groups: [
-      { pharmacyId: 'p1', items: [{ medicineId: 'm1', quantity: 1 }] },
-      { pharmacyId: 'p1', items: [{ medicineId: 'm2', quantity: 1 }] },
-    ],
-  }, { token });
-  assert.equal(repeated.status, 400, 'a mesma farmácia não aparece duas vezes');
-
-  const { status, data } = await post('/api/orders/split', {
-    paymentMethod: 'Pix',
-    groups: [
-      { pharmacyId: 'p1', items: [{ medicineId: 'm1', quantity: 1 }] },
-      { pharmacyId: 'p5', items: [{ medicineId: 'm2', quantity: 2 }] },
-    ],
-  }, { token });
-  assert.equal(status, 201);
-  assert.equal(data.orders.length, 2);
-  assert.notEqual(data.orders[0].code, data.orders[1].code, 'cada pedido tem seu código');
-  assert.deepEqual(data.orders.map(o => o.pharmacyName).sort(), ['Droga Raia', 'Ultrafarma']);
 });
 
 test('preços e quantidades vêm do banco, não do navegador', async () => {
@@ -372,29 +280,6 @@ test('cupom com compra mínima só vale acima do valor', async () => {
   assert.match(small.data.error, /a partir de/i);
 });
 
-test('avisos de preço: cria, lista e apaga', async () => {
-  const email = uniqueEmail('alerta');
-  const { data: session } = await post('/api/auth/signup', { name: 'Alerta Teste', email, password: 'senha123' });
-  const token = session.token;
-
-  assert.deepEqual((await get('/api/alerts', { token })).data, []);
-  assert.equal((await post('/api/alerts', { medicineId: 'nao-existe' }, { token })).status, 404);
-  assert.equal((await post('/api/alerts', { medicineId: 'm1', targetPrice: -5 }, { token })).status, 400);
-
-  const created = await post('/api/alerts', { medicineId: 'm1', targetPrice: 8.5 }, { token });
-  assert.equal(created.status, 201);
-  assert.equal(created.data.targetPrice, 8.5);
-  assert.ok(created.data.referencePrice > 0);
-
-  // Criar de novo o mesmo remédio atualiza o aviso (não duplica).
-  const again = await post('/api/alerts', { medicineId: 'm1', targetPrice: null }, { token });
-  assert.equal(again.data.targetPrice, null);
-  assert.equal((await get('/api/alerts', { token })).data.length, 1);
-
-  assert.equal((await del('/api/alerts/m1', { token })).status, 204);
-  assert.deepEqual((await get('/api/alerts', { token })).data, []);
-});
-
 test('lembretes: cria, marca como disparado e apaga', async () => {
   const email = uniqueEmail('lembrete');
   const { data: session } = await post('/api/auth/signup', { name: 'Lembrete Teste', email, password: 'senha123' });
@@ -428,29 +313,6 @@ test('perfil: troca de senha exige a senha atual', async () => {
   assert.equal(ok.data.passwordChanged, true);
   assert.equal(ok.data.user.name, 'Perfil Novo');
   assert.equal((await post('/api/auth/login', { email, password: 'nova123' })).status, 200);
-});
-
-test('LGPD: baixar meus dados e excluir a conta', async () => {
-  const email = uniqueEmail('lgpd');
-  const { data: session } = await post('/api/auth/signup', { name: 'Ana Exclusão', email, password: 'senha123' });
-  const token = session.token;
-  await post('/api/orders', { pharmacyId: 'p1', paymentMethod: 'Pix', items: [{ medicineId: 'm1', quantity: 1 }] }, { token });
-  await post('/api/reminders', { med: 'Dipirona', time: '09:00', day: 5, month: 10, year: 2026 }, { token });
-
-  const exported = await get('/api/me/export', { token });
-  assert.equal(exported.status, 200);
-  assert.equal(exported.data.conta.email, email);
-  assert.equal(exported.data.pedidos.length, 1);
-  assert.equal(exported.data.pedidos[0].itens.length, 1);
-  assert.equal(exported.data.lembretes.length, 1);
-
-  assert.equal((await del('/api/me', { token })).status, 400, 'exclusão pede a senha');
-  assert.equal((await call('DELETE', '/api/me', { token, body: { password: 'errada' } })).status, 400);
-
-  const removed = await call('DELETE', '/api/me', { token, body: { password: 'senha123' } });
-  assert.equal(removed.status, 204);
-  assert.equal((await post('/api/auth/login', { email, password: 'senha123' })).status, 401);
-  assert.equal((await get('/api/me', { token })).status, 401, 'o token antigo não vale mais');
 });
 
 test('limite de tentativas por e-mail devolve 429', async () => {

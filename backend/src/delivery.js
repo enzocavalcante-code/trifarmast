@@ -86,6 +86,6 @@ function deliverySchedule(baseMs) {
 }
 
 module.exports = {
-  MAX_DELIVERY_KM, BASE_FEE, BASE_KM, FEE_PER_KM, PREPARING_MS, DISPATCH_MS, RIDE_MS,
-  quoteDelivery, parseDistanceKm, randomCourier, deliverySchedule, priceTable,
+  MAX_DELIVERY_KM, PREPARING_MS,
+  quoteDelivery, randomCourier, deliverySchedule, priceTable,
 };

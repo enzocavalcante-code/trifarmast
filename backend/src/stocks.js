@@ -75,8 +75,5 @@ async function consumeDoses(userId, medicines) {
   return rows.map(serializeStock);
 }
 
-async function removeStock(userId, key) {
-  await query('DELETE FROM med_stocks WHERE user_id = $1 AND med_key = $2', [userId, medKey(key)]);
-}
 
-module.exports = { UNIT_LABELS, medKey, listStocks, saveStock, consumeDoses, removeStock };
+module.exports = { listStocks, saveStock, consumeDoses };

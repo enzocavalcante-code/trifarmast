@@ -112,6 +112,7 @@ function order(row, itemRows = [], prescriptionFileName = null) {
     paymentMethod: row.payment_method,
     points: row.points_earned,
     code: row.pickup_code,
+    pickupConfirmedBy: row.pickup_validated_by || null,
     requiresPrescription: row.requires_prescription,
     prescriptionChoice: row.prescription_choice,
     prescriptionFileName,
@@ -143,4 +144,4 @@ function coupon(row) {
   };
 }
 
-module.exports = { STATUS, user, order, orderStatus, handoverStatus, finalStatus, isDelivery, reminder, coupon };
+module.exports = { STATUS, user, order, orderStatus, handoverStatus, isDelivery, reminder, coupon };
