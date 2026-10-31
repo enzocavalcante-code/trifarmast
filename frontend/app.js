@@ -1670,6 +1670,11 @@ function tokenHit(token, words){
   return best;
 }
 
+// Mantida para quem só tem o texto (testes e leitores sem confiança).
+function tokenInText(token, textTokens){
+  return !!tokenHit(token, textTokens.map(t => ({ token: t, conf: null })));
+}
+
 /* Procura no catálogo o remédio que combina com a leitura. Para um remédio ser
    aceito não basta uma palavra parecida: ou duas partes do nome batem, ou a
    palavra que bateu é específica daquele remédio (nada de "teste", "água"). */

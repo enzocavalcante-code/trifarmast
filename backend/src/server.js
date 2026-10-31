@@ -3,13 +3,11 @@ const cors = require('cors');
 const config = require('./config');
 const { migrate } = require('./db');
 const { requireAuth } = require('./auth');
-const { securityHeaders } = require('./security');
 const { HttpError } = require('./errors');
 
 const app = express();
 // O Render fica na frente da API: confia no cabeçalho X-Forwarded-For para saber o IP real do usuário.
 app.set('trust proxy', true);
-app.use(securityHeaders);
 
 app.use(cors({
   // Sem CORS_ORIGINS configurado, libera qualquer origem (útil em desenvolvimento).
@@ -34,7 +32,6 @@ app.use('/api/reminders', requireAuth, require('./routes/reminders'));
 app.use('/api/stocks', requireAuth, require('./routes/stocks'));
 app.use('/api/points', requireAuth, require('./routes/points'));
 app.use('/api/places', requireAuth, require('./routes/places'));
-app.use('/api/pickups', require('./routes/pickups'));   // balcão da farmácia: autentica pelo PIN, não por conta
 
 app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 

@@ -254,6 +254,7 @@ function cartLines(){
 }
 const cartQuantity = medId => (state.cart.items.find(i => i.medId === medId) || {}).qty || 0;
 const cartCount = () => cartLines().reduce((n, i) => n + i.qty, 0);
+const cartHasRx = () => cartLines().some(i => i.med.rx);
 
 // Total do carrinho numa farmácia (null se algum item não tiver preço lá).
 function cartTotalAt(pharmId){
@@ -308,6 +309,8 @@ function changeQty(medId, delta){
   updateCartUI();
   renderCheckout();
 }
+
+function removeFromCart(medId){ changeQty(medId, -MAX_QTY); }
 
 function selectCartPharmacy(pharmId){
   state.cart.pharmacyId = pharmId;

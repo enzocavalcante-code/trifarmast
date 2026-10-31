@@ -83,16 +83,13 @@ const api = (() => {
     // Estoque em casa (quantas unidades a pessoa tem de cada remédio)
     stocks: () => get('/stocks'),
     saveStock: data => request('PUT', '/stocks', data),
+    removeStock: key => del(`/stocks/${encodeURIComponent(key)}`),
 
     // Localização (farmácias próximas e endereços)
     nearbyPharmacies: (lat, lng) => get(`/places/pharmacies?lat=${lat}&lng=${lng}`),
     reverseGeocode: (lat, lng) => get(`/places/reverse?lat=${lat}&lng=${lng}`),
     geocode: q => get(`/places/search?q=${encodeURIComponent(q)}`),
     approximateLocation: () => get('/places/approximate'),
-
-    // Balcão da farmácia (farmacia.html): autentica pela senha do painel, sem conta
-    pickupLookup: (code, pin) => post('/pickups/lookup', { code, pin }),
-    pickupConfirm: (code, pin) => post('/pickups/confirm', { code, pin }),
 
     // Pontos
     points: () => get('/points'),

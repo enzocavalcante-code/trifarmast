@@ -1,6 +1,6 @@
 const express = require('express');
 const { HttpError, asyncHandler } = require('../errors');
-const { listStocks, saveStock } = require('../stocks');
+const { listStocks, saveStock, removeStock } = require('../stocks');
 
 const router = express.Router();
 
@@ -13,6 +13,11 @@ router.put('/', asyncHandler(async (req, res) => {
   const stock = await saveStock(req.userId, req.body);
   if (!stock) throw new HttpError(400, 'Informe o remédio e quantas unidades você tem.');
   res.json({ stock });
+}));
+
+router.delete('/:key', asyncHandler(async (req, res) => {
+  await removeStock(req.userId, req.params.key);
+  res.status(204).end();
 }));
 
 module.exports = router;

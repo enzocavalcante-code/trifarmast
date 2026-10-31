@@ -48,7 +48,7 @@ O projeto ainda está em desenvolvimento e as próximas atualizações serão vo
 - [ ] Ler a receita pela câmera e achar o remédio mais barato(com integração de IA)
 - [ ] Preços de verdade (tabela da CMED e dados das farmácias parceiras)
 - [ ] Pagamento de verdade com Pix
-- [x] Retirada confirmada pela própria farmácia, no balcão (`frontend/farmacia.html`)
+- [ ] Retirada confirmada pela própria farmácia, no balcão
 - [ ] Aplicativo para Android e IOS
 
 ## 💻 Pré-requisitos
@@ -129,8 +129,8 @@ O projeto é dividido em duas partes, publicadas em lugares diferentes:
 
 **Render (backend):** crie um banco PostgreSQL (plano free) e um Web Service com
 *Root Directory* `backend`, *Build* `npm install` e *Start* `npm start`. Preencha as
-variáveis `DATABASE_URL`, `JWT_SECRET`, `GOOGLE_CLIENT_ID`, `CORS_ORIGINS`
-(a URL do Vercel) e `PHARMACY_PIN` (a senha do balcão da farmácia). O arquivo `backend/render.yaml` faz tudo isso de uma vez pelo
+variáveis `DATABASE_URL`, `JWT_SECRET`, `GOOGLE_CLIENT_ID` e `CORS_ORIGINS`
+(a URL do Vercel). O arquivo `backend/render.yaml` faz tudo isso de uma vez pelo
 menu *New + → Blueprint*.
 
 **Vercel (site):** aponte `API_URL` em `frontend/config.js` para o endereço do

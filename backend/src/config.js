@@ -14,8 +14,6 @@ module.exports = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   // Origens autorizadas a chamar a API (URL do Vercel, localhost...), separadas por vírgula.
   corsOrigins: (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
-  // Senha única do painel do balcão (frontend/farmacia.html).
-  pharmacyPin: process.env.PHARMACY_PIN || '',
   // Permite os botões "Usar conta demo" quando o login do Google não estiver configurado.
   allowDemoGoogle: process.env.ALLOW_DEMO_GOOGLE !== 'false',
 };

@@ -63,4 +63,4 @@ async function loadAccountData(userId) {
   return { orders, reminders, points, stocks };
 }
 
-module.exports = { loadOrders, loadPoints, loadAccountData };
+module.exports = { loadOrders, loadPoints, loadReminders, loadAccountData };

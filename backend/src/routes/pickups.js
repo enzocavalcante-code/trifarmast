@@ -112,6 +112,15 @@ router.post('/confirm', limitPickup, asyncHandler(async (req, res) => {
     if (locked.points_earned > 0) {
       await addPoints(client, locked.user_id, locked.points_earned, `Pedido #${locked.id} retirado na ${locked.pharmacy_name}`);
     }
+    await client.query(
+      `INSERT INTO notifications (user_id, kind, title, body, order_id)
+       VALUES ($1, 'order', $2, $3, $4)`,
+      [locked.user_id, `Pedido #${locked.id} retirado`,
+       locked.points_earned > 0
+         ? `A ${locked.pharmacy_name} confirmou a entrega e ${locked.points_earned} pontos entraram no seu saldo.`
+         : `A ${locked.pharmacy_name} confirmou a entrega do seu pedido.`,
+       locked.id]
+    );
     return orderDetails(client, { ...locked, customer_name: order.customer_name, completed: true });
   });
 
