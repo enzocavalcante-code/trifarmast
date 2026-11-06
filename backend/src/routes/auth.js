@@ -109,8 +109,10 @@ router.post('/login', limitLogin, asyncHandler(async (req, res) => {
   if (user && user.google_account && !user.password_hash) {
     throw new HttpError(401, 'Esta conta usa login do Google. Entre pelo botão do Google.');
   }
-  if (!user || !(await checkPassword(password, user.password_hash))) {
-    throw new HttpError(401, 'E-mail ou senha incorretos.');
+  // Mensagens separadas: ajuda quem errou o e-mail a perceber o engano.
+  if (!user) throw new HttpError(401, 'Não encontramos nenhuma conta com esse e-mail.');
+  if (!(await checkPassword(password, user.password_hash))) {
+    throw new HttpError(401, 'Senha incorreta. Tente de novo.');
   }
   clearLimit('login', req, email);   // senha certa: a pessoa não fica presa no limite
   await sendSession(res, user, false);

@@ -61,6 +61,7 @@ const api = (() => {
     googleDemo: mode => post('/auth/google-demo', { mode }),
 
     // Perfil
+    me: () => get('/me'),
     updateMe: data => patch('/me', data),
 
     // Catálogo
