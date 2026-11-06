@@ -26,6 +26,14 @@ app.get('/health', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Enquanto o banco não termina de preparar, a API responde "tente de novo"
+// em vez de dar erro feio. O /health acima continua respondendo desde o início.
+let bancoPronto = false;
+app.use('/api', (req, res, next) => {
+  if (bancoPronto) return next();
+  res.status(503).json({ error: 'Estamos ligando o servidor. Tente de novo em alguns segundos.' });
+});
+
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/catalog'));
 app.use('/api/me', requireAuth, require('./routes/me'));
@@ -46,9 +54,20 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erro interno. Tente novamente em instantes.' });
 });
 
-migrate()
-  .then(() => app.listen(config.port, () => console.log(`Trifarmas API rodando na porta ${config.port}`)))
-  .catch(err => {
-    console.error('Falha ao preparar o banco de dados:', err);
-    process.exit(1);
-  });
+// Abre a porta ANTES de falar com o banco: é isso que o Render espera para dar
+// o deploy como bem-sucedido. Se o banco demorar ou estiver fora do ar, o
+// serviço continua de pé e tenta de novo sozinho, em vez de derrubar o deploy.
+app.listen(config.port, '0.0.0.0', () => console.log(`Trifarmas API rodando na porta ${config.port}`));
+
+async function prepararBanco(tentativa = 1) {
+  try {
+    await migrate();
+    bancoPronto = true;
+    console.log('Banco de dados pronto.');
+  } catch (err) {
+    const espera = Math.min(5 * tentativa, 60);
+    console.error(`Falha ao preparar o banco (tentativa ${tentativa}): ${err.message}. Nova tentativa em ${espera}s.`);
+    setTimeout(() => prepararBanco(tentativa + 1), espera * 1000);
+  }
+}
+prepararBanco();

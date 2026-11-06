@@ -10,6 +10,10 @@ const pool = new Pool({
   ssl: config.databaseSsl ? { rejectUnauthorized: false } : false,
 });
 
+// O PostgreSQL do Render fecha conexões paradas. Sem este tratador, o erro
+// chega ao Node como exceção não capturada e o servidor inteiro cai.
+pool.on('error', err => console.error('Conexão ociosa com o banco caiu:', err.message));
+
 const query = (text, params) => pool.query(text, params);
 
 // Executa uma função dentro de uma transação (BEGIN / COMMIT / ROLLBACK).
