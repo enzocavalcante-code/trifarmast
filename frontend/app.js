@@ -603,6 +603,7 @@ async function enterApp(session){
 
   $('view-login').classList.add('hidden');
   $('view-signup').classList.add('hidden');
+  $('view-loading').classList.add('hidden');   // tela de reconexão sai da frente
   $('app').classList.remove('hidden');
   hideGoogleInvite();
 
