@@ -1,7 +1,6 @@
 <div align="center">  <img src="frontend/assets/logo.png" alt="Trifarmas" width="300"> </div>
 <br>
 <div align="center">
-  <img src="frontend/assets/logo.png" alt="Trifarmas" width="300">
 
   <img src="https://img.shields.io/badge/license-MIT-1e8a4c?style=for-the-badge" alt="MIT License">
   <img src="https://img.shields.io/badge/javascript-f7df1e?style=for-the-badge&logo=javascript&logoColor=000000" alt="JavaScript">
@@ -76,7 +75,7 @@ Passwords hashed with bcrypt, lockout after repeated failed attempts, sessions r
 uploaded files validated before saving and all text escaped before it reaches the page.
 Tests live in `backend/test/` and run with `npm test`.
 
-## Team
+## Our team
 
 <table>
   <tr>
