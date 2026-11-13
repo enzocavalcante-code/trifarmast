@@ -139,6 +139,7 @@ function setupPasswordToggles(){
 function showView(name){
   $('view-login').classList.toggle('hidden', name!=='login');
   $('view-signup').classList.toggle('hidden', name!=='signup');
+  $('view-loading').classList.toggle('hidden', name!=='loading');
   $('login-error').classList.add('hidden');
   // Voltando para a tela inicial, o convite do Google não faz mais sentido.
   if(name !== 'signup' && typeof hideGoogleInvite === 'function') hideGoogleInvite();
@@ -220,17 +221,137 @@ function setAvatar(img, src){
 }
 
 // A foto escolhida manualmente substitui a do Google e fica salva na conta.
+// Antes de salvar, a pessoa enquadra a foto do jeito que quiser.
 async function pickSettingsAvatar(input){
   const file = input.files && input.files[0];
   input.value = '';
   if(!file || !state.user) return;
+  if(!/^image\//.test(file.type)){ showToast('Escolha uma imagem (JPG ou PNG).'); return; }
   try{
-    const avatar = await resizeImage(file, 320, { square:true });
+    const avatar = await recortarFoto(file);
+    if(!avatar) return;                       // a pessoa cancelou
     const { user } = await api.updateMe({ avatar });
     state.user = { ...state.user, ...user };
     refreshProfileUI();
     showToast('Foto atualizada!');
   }catch(e){ showToast(e.message); }
+}
+
+/* Tela de enquadramento: arrasta para mover, barra para aproximar.
+   O mesmo desenho serve para a prévia e para a imagem salva, então o que a
+   pessoa vê no círculo é exatamente o que vai para a conta. */
+const AVATAR_PX = 320;   // tamanho salvo
+const ICON_ARRASTAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M5 9l-3 3 3 3M19 9l3 3-3 3M9 5l3-3 3 3M9 19l3 3 3-3"/></svg>';
+const ICON_FOTO_P = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="7" width="14" height="11" rx="2"/><circle cx="9.5" cy="11" r="1.2"/><path d="M5 16l4-3 3 2 3-3 4 4"/></svg>';
+const ICON_FOTO_G = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><circle cx="8.5" cy="10" r="1.6"/><path d="M2.5 17l5.5-4.5 4 3 4-4 5.5 5.5"/></svg>';
+
+function recortarFoto(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não consegui abrir essa imagem. Use JPG ou PNG.')); };
+    img.onload = () => {
+      const back = document.createElement('div');
+      back.className = 'modal-back crop-back';
+      back.innerHTML = `<div class="modal-box crop-box" role="dialog" aria-modal="true" aria-label="Ajustar foto do perfil">
+        <div class="crop-head">
+          <div class="icon-circle">${ICON_CAMERA}</div>
+          <div>
+            <h3>Ajuste sua foto</h3>
+            <p>O que estiver dentro do círculo vira sua foto de perfil.</p>
+          </div>
+        </div>
+        <div class="crop-stage">
+          <canvas class="crop-canvas" width="560" height="560"></canvas>
+          <div class="crop-mask"></div>
+          <div class="crop-ring"></div>
+        </div>
+        <p class="crop-hint">${ICON_ARRASTAR} Arraste a foto para enquadrar</p>
+        <label class="crop-zoom">
+          <span class="sr-only">Aproximar a foto</span>
+          ${ICON_FOTO_P}
+          <input type="range" min="100" max="300" value="100" step="1" aria-label="Aproximar a foto">
+          ${ICON_FOTO_G}
+        </label>
+        <div class="crop-actions">
+          <button class="btn btn-ghost" data-cancel>Cancelar</button>
+          <button class="btn btn-primary" data-ok>Usar esta foto</button>
+        </div>
+      </div>`;
+
+      const canvas = back.querySelector('.crop-canvas');
+      const zoom = back.querySelector('input[type=range]');
+      const ctx = canvas.getContext('2d');
+      const base = canvas.width / Math.min(img.naturalWidth, img.naturalHeight);  // zoom 1 = preenche
+      let escala = 1, dx = 0, dy = 0;                                             // dx/dy em fração do quadro
+
+      const limite = () => {
+        const larg = img.naturalWidth * base * escala;
+        const alt = img.naturalHeight * base * escala;
+        return { x: Math.max(0, (larg - canvas.width) / 2) / canvas.width,
+                 y: Math.max(0, (alt - canvas.height) / 2) / canvas.height };
+      };
+      const desenhar = (destino = ctx, lado = canvas.width) => {
+        const k = (lado / canvas.width) * base * escala;
+        const larg = img.naturalWidth * k, alt = img.naturalHeight * k;
+        destino.fillStyle = '#ffffff';
+        destino.fillRect(0, 0, lado, lado);
+        destino.drawImage(img, (lado - larg) / 2 + dx * lado, (lado - alt) / 2 + dy * lado, larg, alt);
+      };
+      const ajustar = () => {
+        const max = limite();
+        dx = Math.max(-max.x, Math.min(max.x, dx));
+        dy = Math.max(-max.y, Math.min(max.y, dy));
+        desenhar();
+      };
+
+      const dica = back.querySelector('.crop-hint');
+      const jaMexeu = () => dica.classList.add('escondida');
+
+      zoom.oninput = () => { escala = Number(zoom.value) / 100; jaMexeu(); ajustar(); };
+
+      let arrastando = null;
+      canvas.addEventListener('pointerdown', e => {
+        arrastando = { x: e.clientX, y: e.clientY };
+        jaMexeu();
+        canvas.setPointerCapture(e.pointerId);
+      });
+      canvas.addEventListener('pointermove', e => {
+        if(!arrastando) return;
+        const caixa = canvas.getBoundingClientRect();
+        dx += (e.clientX - arrastando.x) / caixa.width;
+        dy += (e.clientY - arrastando.y) / caixa.height;
+        arrastando = { x: e.clientX, y: e.clientY };
+        ajustar();
+      });
+      const soltar = () => { arrastando = null; };
+      canvas.addEventListener('pointerup', soltar);
+      canvas.addEventListener('pointercancel', soltar);
+
+      const fechar = valor => {
+        document.removeEventListener('keydown', aoTeclar);
+        URL.revokeObjectURL(url);
+        back.remove();
+        resolve(valor);
+      };
+      const aoTeclar = e => { if(e.key === 'Escape') fechar(null); };
+
+      back.querySelector('[data-cancel]').onclick = () => fechar(null);
+      back.querySelector('[data-ok]').onclick = () => {
+        const saida = document.createElement('canvas');
+        saida.width = saida.height = AVATAR_PX;
+        desenhar(saida.getContext('2d'), AVATAR_PX);
+        fechar(saida.toDataURL('image/jpeg', 0.85));
+      };
+      back.onclick = e => { if(e.target === back) fechar(null); };
+      document.addEventListener('keydown', aoTeclar);
+
+      document.body.appendChild(back);
+      ajustar();
+      back.querySelector('[data-ok]').focus();
+    };
+    img.src = url;
+  });
 }
 
 async function resetGooglePhoto(){
@@ -445,6 +566,7 @@ async function doSignup(){
 
 function doLogout(){
   api.setToken(null);
+  storage.set(SESSION_KEY, null);
   if(ocrWorker){ try{ ocrWorker.terminate(); }catch{ /* já encerrado */ } ocrWorker = null; ocrWorkerPromise = null; }
   stopOrderTimers();
   if(typeof stopRefining === 'function') stopRefining();
@@ -463,8 +585,13 @@ function doLogout(){
   $('login-pass').value='';
 }
 
+// A sessão fica guardada no aparelho para que atualizar a página não jogue a
+// pessoa de volta para o login. Vale 7 dias, que é a validade do token.
+const SESSION_KEY = 'trifarmas-session';
+
 async function enterApp(session){
   api.setToken(session.token);
+  storage.set(SESSION_KEY, session.token);
   state.user = session.user;
   state.points = session.user.points;
   state.resultsLimit = RESULTS_PAGE_SIZE;
@@ -476,6 +603,7 @@ async function enterApp(session){
 
   $('view-login').classList.add('hidden');
   $('view-signup').classList.add('hidden');
+  $('view-loading').classList.add('hidden');   // tela de reconexão sai da frente
   $('app').classList.remove('hidden');
   hideGoogleInvite();
 
@@ -494,6 +622,36 @@ async function enterApp(session){
 
   // Nada bloqueia a tela: se os dados não vieram no login, chegam agora.
   if(!hasData) refreshAccountData();
+}
+
+/* Reconecta a sessão guardada ao abrir ou atualizar a página.
+   O servidor gratuito pode estar dormindo, então insistimos algumas vezes
+   antes de desistir — só um token recusado (401) leva de volta ao login. */
+async function restaurarSessao(token){
+  showView('loading');
+  api.setToken(token);
+  api.warmUp();
+  for(let tentativa = 1; tentativa <= 4; tentativa++){
+    try{
+      const user = await api.me();
+      await enterApp({ token, user });
+      return;
+    }catch(e){
+      if(e.status === 401){            // token vencido ou conta apagada
+        api.setToken(null);
+        storage.set(SESSION_KEY, null);
+        showView('login');
+        return;
+      }
+      if(tentativa === 1) $('loading-msg').textContent = 'Acordando o servidor…';
+      if(tentativa === 4){
+        showView('login');             // mantém o token: a próxima tentativa pode dar certo
+        showToast('O servidor demorou a responder. Tente entrar de novo.');
+        return;
+      }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
 }
 
 // Pedidos, lembretes e pontos que vieram junto com o login.
@@ -1985,7 +2143,7 @@ function showNoMedicineFound(guess = ''){
       ? `Li “${escapeHtml(guess)}”, que não está no catálogo. Quer procurar assim mesmo?`
       : 'Deixe o nome e a dosagem dentro da moldura, com o aparelho parado.',
     buttons: [
-      ...(guess ? [{ label: `Procurar “${guess}”`, primary: true, onClick: `searchForTerm('${guess.replace(/'/g, "\\'")}')` }] : []),
+      ...(guess ? [{ label: `Procurar “${guess}”`, primary: true, onClick: 'searchForTerm(this.dataset.term)', term: guess }] : []),
       { label: 'Ler de novo', primary: !guess, onClick: 'captureAndRead()' },
     ],
   });
@@ -2054,7 +2212,7 @@ function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body =
     </div>
     ${note ? `<p class="ss-note">${escapeHtml(note)}</p>` : ''}
     <div class="ss-actions">
-      ${buttons.map(b => `<button class="${b.primary ? 'btn btn-primary' : 'btn btn-ghost'}" onclick="${b.onClick}">${escapeHtml(b.label)}</button>`).join('')}
+      ${buttons.map(b => `<button class="${b.primary ? 'btn btn-primary' : 'btn btn-ghost'}" data-term="${escapeHtml(b.term || '')}" onclick="${b.onClick}">${escapeHtml(b.label)}</button>`).join('')}
     </div>
     ${footer ? `<p class="ss-foot">${footer}</p>` : ''}`;
   box.classList.remove('hidden');
@@ -2107,7 +2265,7 @@ function showScannedTerm(term, meds, source = 'caixa', doseRead = true){
     ].filter(Boolean).join(' · '),
     price: cheapest,
     note: doseRead ? '' : 'Não consegui ler a dosagem — escolha a sua na próxima tela.',
-    buttons: [{ label: 'Ver os preços', primary: true, onClick: `searchForTerm('${term.replace(/'/g, "\\'")}')` }],
+    buttons: [{ label: 'Ver os preços', primary: true, onClick: 'searchForTerm(this.dataset.term)', term }],
     footer: 'Não é este remédio? <button class="link-btn" onclick="captureAndRead()">Ler de novo</button>',
   });
 }
@@ -2400,7 +2558,7 @@ function renderRefillAlert(){
     </div>
     <p>Compre antes de terminar para não ficar sem tomar.</p>
     ${ending.map(item => {
-      const arg = `'${escapeHtml(item.med).replace(/'/g, "\\'")}'`;
+      const med = `data-med="${escapeHtml(item.med)}"`;   // o nome vai como dado, nunca dentro do código do onclick
       const detail = [
         stockDetail(item),
         item.lastDate ? `lembretes até ${dayName(item.lastDate)}` : '',
@@ -2412,10 +2570,10 @@ function renderRefillAlert(){
           <span><b class="refill-when">${refillPhrase(item)}</b>${detail ? ` · ${detail}` : ''}</span>
         </div>
         <div class="refill-actions">
-          <button class="btn btn-primary" onclick="buyAgain(${arg})">Comprar de novo</button>
-          <button class="btn-outline-sm" onclick="askStock(${arg})">${item.stock ? 'Atualizar quantidade' : 'Tenho em casa'}</button>
+          <button class="btn btn-primary" ${med} onclick="buyAgain(this.dataset.med)">Comprar de novo</button>
+          <button class="btn-outline-sm" ${med} onclick="askStock(this.dataset.med)">${item.stock ? 'Atualizar quantidade' : 'Tenho em casa'}</button>
           ${item.scheduleDays !== null && item.scheduleDays <= REFILL_WARNING_DAYS
-            ? `<button class="btn-outline-sm" onclick="extendTreatment(${arg})">Agendar mais dias</button>` : ''}
+            ? `<button class="btn-outline-sm" ${med} onclick="extendTreatment(this.dataset.med)">Agendar mais dias</button>` : ''}
         </div>
       </div>`;
     }).join('')}`;
@@ -2893,12 +3051,12 @@ function renderReminderList(){
       : `De ${first.getDate()} a ${last.getDate()} de ${MONTHS[last.getMonth()].toLowerCase()} · ${group.dates.length} dias`;
     const stock = stockFor(group.med);
     const daysLeft = stockDaysLeft(group.med);
-    const arg = `'${escapeHtml(group.med).replace(/'/g, "\\'")}'`;
+    const med = `data-med="${escapeHtml(group.med)}"`;
     const stockLine = stock
-      ? `<button class="rem-stock ${daysLeft !== null && daysLeft <= REFILL_WARNING_DAYS ? 'low' : ''}" onclick="askStock(${arg})">
+      ? `<button class="rem-stock ${daysLeft !== null && daysLeft <= REFILL_WARNING_DAYS ? 'low' : ''}" ${med} onclick="askStock(this.dataset.med)">
            ${unitsPhrase(stock)} em casa${daysLeft !== null ? ` · dá para ${daysLeft} ${daysLeft === 1 ? 'dia' : 'dias'}` : ''}
          </button>`
-      : `<button class="rem-stock add" onclick="askStock(${arg})">Informar quantos tem em casa</button>`;
+      : `<button class="rem-stock add" ${med} onclick="askStock(this.dataset.med)">Informar quantos tem em casa</button>`;
     return `
     <div class="rem-item ${group.pending ? '' : 'done'}">
       <div class="rem-time">${group.time}</div>
@@ -3006,12 +3164,13 @@ async function saveSettings(){
   const confirmPassword = $('settings-pass-confirm').value;
 
   try{
-    const { user, passwordChanged } = await api.updateMe({
+    const { user, passwordChanged, token } = await api.updateMe({
       name: $('settings-name').value.trim(),
       email: $('settings-email').value.trim(),
       currentPassword, newPassword, confirmPassword,
     });
     state.user = { ...state.user, ...user };
+    if(token){ api.setToken(token); storage.set(SESSION_KEY, token); }   // senha nova: os outros aparelhos saem da conta
     $('settings-pass-current').value='';
     $('settings-pass').value='';
     $('settings-pass-confirm').value='';
@@ -3100,14 +3259,23 @@ function bindReminderChips(){
 }
 
 function initApp(){
+  // O servidor recusou a sessão no meio do uso: volta para o login em vez de
+  // deixar a tela aberta com tudo falhando.
+  api.onSessionExpired = () => {
+    if(!state.user) return;
+    doLogout();
+    showToast('Sua sessão terminou. Entre de novo.');
+  };
   applyLogo();
   buildNav();
   setupPasswordToggles();
   bindReminderChips();
   applyTheme(storage.get('trifarmas-theme') === 'dark' ? 'dark' : 'light');
   applyFontScale(Number(storage.get('trifarmas-font-scale')) || 1);
-  showView('login');
+  const sessaoSalva = storage.get(SESSION_KEY);
+  showView(sessaoSalva ? 'loading' : 'login');
   initGoogleSignIn();
+  if(sessaoSalva) restaurarSessao(sessaoSalva);
 
   // 1) catálogo guardado no aparelho entra na hora; 2) o servidor é acordado
   // enquanto a pessoa digita a senha; 3) a versão nova do catálogo chega depois.

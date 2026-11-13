@@ -21,6 +21,8 @@ const api = (() => {
     }
     if (res.status === 204) return null;
     const data = await res.json().catch(() => ({}));
+    // Sessão recusada no meio do uso (venceu, ou a senha foi trocada em outro aparelho).
+    if (res.status === 401 && token && api.onSessionExpired) api.onSessionExpired();
     if (!res.ok) {
       // Alguns erros trazem informação extra (ex.: conta Google sem cadastro).
       const error = new Error(data.error || 'Algo deu errado. Tente novamente.');
@@ -61,6 +63,7 @@ const api = (() => {
     googleDemo: mode => post('/auth/google-demo', { mode }),
 
     // Perfil
+    me: () => get('/me'),
     updateMe: data => patch('/me', data),
 
     // Catálogo

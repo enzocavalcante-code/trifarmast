@@ -56,4 +56,4 @@ async function seed(client, hashPassword) {
   }
 }
 
-module.exports = { seed };
+module.exports = { seed, DEMO_EMAIL: DEMO_USER.email };

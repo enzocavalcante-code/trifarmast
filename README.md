@@ -138,6 +138,40 @@ Render, crie o projeto com *Root Directory* `frontend` e *Framework Preset* **Ot
 Por fim, adicione a URL do Vercel nas *Origens JavaScript autorizadas* do seu
 Client ID do Google.
 
+**Banco que não expira:** o PostgreSQL gratuito do Render é apagado 30 dias depois
+de criado. Para não perder as contas, crie o banco no [Neon](https://neon.com)
+(gratuito, sem prazo) e cole a *connection string* dele na variável `DATABASE_URL`
+do Render. As tabelas e o catálogo são criados sozinhos na primeira vez que a API sobe.
+
+## 🔒 Segurança
+
+O que a API faz para não ser invadida:
+
+- **Senhas** guardadas com bcrypt; senha nova precisa de 8 caracteres ou mais.
+- **Força bruta:** 8 senhas erradas por conta em cada rede (30 no total) travam o
+  login por 15 minutos; o mesmo vale para a senha do balcão (10 por rede, 100 no total).
+  O IP vem da hospedagem, não do cabeçalho que o visitante escreve.
+- **Sessão:** token assinado (HS256) válido por 7 dias; trocar a senha derruba as
+  sessões abertas nos outros aparelhos. Trocar e-mail ou senha exige a senha atual.
+- **Arquivos:** foto de perfil só JPG/PNG/WebP até 512 KB e receita só PDF/imagem
+  até 8 MB, com o conteúdo conferido; pedidos comuns são limitados a 100 KB.
+- **Banco:** toda consulta usa parâmetros (sem SQL montado com texto do usuário) e
+  cada conta só enxerga os próprios pedidos, lembretes e cupons.
+- **Site:** todo texto vindo de fora (nomes, endereços, leitura da câmera) é
+  escapado antes de ir para a tela, e as páginas não abrem dentro de outros sites.
+- **Conta de teste:** a senha dela é pública, então e-mail e senha não podem ser alterados.
+
+No Render, confira três variáveis: `JWT_SECRET` (aleatório, 32 caracteres ou mais —
+use o botão *Generate*), `CORS_ORIGINS` (a URL do site no Vercel) e `PHARMACY_PIN`
+(6 caracteres ou mais). Se alguma estiver fraca, a API avisa nos *Logs* com
+`[segurança]`.
+
+Os testes ficam em `backend/test/` (precisam de um PostgreSQL de teste):
+
+```bash
+DATABASE_URL=postgres://postgres@localhost:5432/trifarmas_test npm test
+```
+
 
 
 ## 🤝 Colaboradores

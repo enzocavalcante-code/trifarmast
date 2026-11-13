@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const { query, transaction } = require('../db');
 const { HttpError, asyncHandler } = require('../errors');
@@ -6,6 +7,7 @@ const { pointsForPayment, addPoints } = require('../points');
 const { quoteDelivery, randomCourier, MAX_DELIVERY_KM } = require('../delivery');
 const serialize = require('../serializers');
 const { loadOrders } = require('../account');
+const { rateLimit } = require('../security');
 
 const router = express.Router();
 
@@ -16,6 +18,11 @@ const MAX_ITEMS = 30;
 const MAX_QUANTITY = 10;
 const PRESCRIPTION_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 const MAX_PRESCRIPTION_BYTES = 8 * 1024 * 1024;
+
+// Por conta: ninguém enche o banco de pedidos e de receitas de 8 MB.
+const byUser = req => req.userId;
+const limitOrders = rateLimit({ name: 'pedidos', windowMs: 60 * 60 * 1000, max: 30, key: byUser, message: 'Muitos pedidos em pouco tempo. Tente de novo mais tarde.' });
+const limitUploads = rateLimit({ name: 'receitas', windowMs: 60 * 60 * 1000, max: 20, key: byUser, message: 'Muitos envios de receita em pouco tempo. Tente de novo mais tarde.' });
 
 async function loadOrder(db, userId, orderId) {
   const [order] = await loadOrders(db, userId, orderId);
@@ -48,8 +55,9 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 // Cria o pedido a partir do carrinho. Preços sempre vêm do banco (nunca do navegador).
-router.post('/', asyncHandler(async (req, res) => {
-  const { pharmacyId, paymentMethod } = req.body;
+router.post('/', limitOrders, asyncHandler(async (req, res) => {
+  const { paymentMethod } = req.body;
+  const pharmacyId = String(req.body.pharmacyId || '');
   const couponId = req.body.couponId ? Number(req.body.couponId) : null;
   if (couponId !== null && !Number.isSafeInteger(couponId)) throw new HttpError(400, 'Cupom indisponível.');
   if (!PAYMENT_METHODS.includes(paymentMethod)) throw new HttpError(400, 'Escolha uma forma de pagamento.');
@@ -106,7 +114,7 @@ router.post('/', asyncHandler(async (req, res) => {
     const merchandise = +(subtotal - discount).toFixed(2);
     const paidAmount = +(merchandise + deliveryFee).toFixed(2);
     const summary = items.length === 1 ? items[0].name : `${items[0].name} e mais ${items.length - 1}`;
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = String(crypto.randomInt(100000, 1000000));   // sorteio que não dá para prever
 
     const { rows: [created] } = await client.query(
       `INSERT INTO orders (user_id, pharmacy_id, pharmacy_name, medicine_name, price, subtotal, discount, coupon_name,
@@ -138,14 +146,14 @@ router.post('/', asyncHandler(async (req, res) => {
 
 // Receita médica: o usuário escolhe anexar o arquivo (PDF ou foto) ou mostrar na retirada.
 // Enquanto não escolher, o pedido fica em "Aguardando receita".
-router.post('/:id/prescription', asyncHandler(async (req, res) => {
+router.post('/:id/prescription', limitUploads, asyncHandler(async (req, res) => {
   const { choice } = req.body;
   if (!['upload', 'in_person'].includes(choice)) throw new HttpError(400, 'Escolha como vai apresentar a receita.');
 
   let file = null;
   if (choice === 'upload') {
-    const parsed = parseDataUrl(req.body.file);
-    if (!parsed || !PRESCRIPTION_TYPES.includes(parsed.mime)) throw new HttpError(400, 'Envie a receita em PDF ou imagem (JPG, PNG).');
+    const parsed = parseDataUrl(req.body.file, PRESCRIPTION_TYPES);
+    if (!parsed) throw new HttpError(400, 'Envie a receita em PDF ou imagem (JPG, PNG).');
     if (parsed.bytes > MAX_PRESCRIPTION_BYTES) throw new HttpError(400, 'Arquivo muito grande. Envie um arquivo de até 8 MB.');
     file = { mime: parsed.mime, data: req.body.file, name: String(req.body.fileName || 'receita').slice(0, 120) };
   }

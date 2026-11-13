@@ -304,15 +304,15 @@ test('perfil: troca de senha exige a senha atual', async () => {
   const { data: session } = await post('/api/auth/signup', { name: 'Perfil Teste', email, password: 'senha123' });
   const token = session.token;
 
-  assert.equal((await call('PATCH', '/api/me', { token, body: { newPassword: 'nova123', confirmPassword: 'nova123' } })).status, 400);
-  assert.equal((await call('PATCH', '/api/me', { token, body: { currentPassword: 'errada', newPassword: 'nova123', confirmPassword: 'nova123' } })).status, 400);
-  assert.equal((await call('PATCH', '/api/me', { token, body: { currentPassword: 'senha123', newPassword: 'nova123', confirmPassword: 'outra123' } })).status, 400);
+  assert.equal((await call('PATCH', '/api/me', { token, body: { newPassword: 'nova1234', confirmPassword: 'nova1234' } })).status, 400);
+  assert.equal((await call('PATCH', '/api/me', { token, body: { currentPassword: 'errada', newPassword: 'nova1234', confirmPassword: 'nova1234' } })).status, 400);
+  assert.equal((await call('PATCH', '/api/me', { token, body: { currentPassword: 'senha123', newPassword: 'nova1234', confirmPassword: 'outra1234' } })).status, 400);
 
-  const ok = await call('PATCH', '/api/me', { token, body: { name: 'Perfil Novo', currentPassword: 'senha123', newPassword: 'nova123', confirmPassword: 'nova123' } });
+  const ok = await call('PATCH', '/api/me', { token, body: { name: 'Perfil Novo', currentPassword: 'senha123', newPassword: 'nova1234', confirmPassword: 'nova1234' } });
   assert.equal(ok.status, 200);
   assert.equal(ok.data.passwordChanged, true);
   assert.equal(ok.data.user.name, 'Perfil Novo');
-  assert.equal((await post('/api/auth/login', { email, password: 'nova123' })).status, 200);
+  assert.equal((await post('/api/auth/login', { email, password: 'nova1234' })).status, 200);
 });
 
 test('limite de tentativas por e-mail devolve 429', async () => {

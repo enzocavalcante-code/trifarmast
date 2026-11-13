@@ -3,19 +3,21 @@ const cors = require('cors');
 const config = require('./config');
 const { migrate } = require('./db');
 const { requireAuth } = require('./auth');
-const { securityHeaders } = require('./security');
+const { securityHeaders, rateLimit } = require('./security');
 const { HttpError } = require('./errors');
 
 const app = express();
-// O Render fica na frente da API: confia no cabeçalho X-Forwarded-For para saber o IP real do usuário.
-app.set('trust proxy', true);
+app.disable('x-powered-by');
+// A hospedagem fica na frente da API. Confiar no X-Forwarded-For inteiro ("true")
+// deixaria qualquer um inventar o próprio IP; aqui só vale o trecho escrito
+// pelos servidores da hospedagem.
+app.set('trust proxy', config.trustProxy);
 app.use(securityHeaders);
 
 app.use(cors({
   // Sem CORS_ORIGINS configurado, libera qualquer origem (útil em desenvolvimento).
   origin: config.corsOrigins.length ? config.corsOrigins : true,
 }));
-app.use(express.json({ limit: '12mb' })); // fotos de perfil e receitas chegam como data URL
 
 // Usado também para "acordar" o serviço gratuito do Render enquanto a pessoa
 // digita a senha: com ?warm=1 abre uma conexão com o banco antes do login.
@@ -25,6 +27,20 @@ app.get('/health', async (req, res) => {
   }
   res.json({ ok: true });
 });
+
+// Teto geral por IP: segura enxurradas de pedidos sem atrapalhar o uso normal.
+app.use('/api', rateLimit({ name: 'geral', windowMs: 5 * 60 * 1000, max: 1500 }));
+
+// Corpo dos pedidos: 100 KB bastam para quase tudo. Só a foto de perfil e a
+// receita aceitam mais — e só depois de conferida a sessão, para ninguém de
+// fora despejar megabytes no servidor.
+const corpo = limite => {
+  const ler = express.json({ limit: limite });
+  return (req, res, next) => (req.body ? next() : ler(req, res, next));
+};
+const corpoPequeno = corpo('100kb');
+const temArquivo = req => req.path === '/api/me' || /^\/api\/orders\/\d+\/prescription$/.test(req.path);
+app.use((req, res, next) => (temArquivo(req) ? next() : corpoPequeno(req, res, next)));
 
 // Enquanto o banco não termina de preparar, a API responde "tente de novo"
 // em vez de dar erro feio. O /health acima continua respondendo desde o início.
@@ -36,8 +52,8 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api', require('./routes/catalog'));
-app.use('/api/me', requireAuth, require('./routes/me'));
-app.use('/api/orders', requireAuth, require('./routes/orders'));
+app.use('/api/me', requireAuth, corpo('1mb'), require('./routes/me'));
+app.use('/api/orders', requireAuth, corpo('12mb'), require('./routes/orders'));
 app.use('/api/reminders', requireAuth, require('./routes/reminders'));
 app.use('/api/stocks', requireAuth, require('./routes/stocks'));
 app.use('/api/points', requireAuth, require('./routes/points'));
@@ -48,8 +64,12 @@ app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+  if (err instanceof HttpError) {
+    if (err.retryAfter) res.setHeader('Retry-After', String(err.retryAfter));
+    return res.status(err.status).json({ error: err.message });
+  }
   if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Arquivo muito grande. Envie um arquivo de até 8 MB.' });
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Não entendi os dados enviados.' });
   console.error(err);
   res.status(500).json({ error: 'Erro interno. Tente novamente em instantes.' });
 });

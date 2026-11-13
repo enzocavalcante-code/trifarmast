@@ -692,7 +692,7 @@ function renderPharmacyList(){
   title.textContent = `Farmácias perto de você (${loc.pharmacies.length})`;
   el.innerHTML = loc.pharmacies.slice(0, 20).map(p=>`
     <div class="near-item">
-      <button class="near-main" onclick="focusPharmacy('${p.id}')">
+      <button class="near-main" data-id="${escapeHtml(p.id)}" onclick="focusPharmacy(this.dataset.id)">
         ${pharmacyLogoHtml(p, 'near-logo')}
         <span class="near-text">
           <b>${escapeHtml(p.name)}</b>

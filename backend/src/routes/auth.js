@@ -2,9 +2,9 @@ const express = require('express');
 const { OAuth2Client } = require('google-auth-library');
 const config = require('../config');
 const { query, transaction } = require('../db');
-const { hashPassword, checkPassword, signToken } = require('../auth');
+const { hashPassword, checkPassword, signToken, normalizeEmail, looksLikeEmail, assertNewPassword, assertName } = require('../auth');
 const { HttpError, asyncHandler } = require('../errors');
-const { rateLimit, clearLimit } = require('../security');
+const { rateLimit, attempts, clientIp } = require('../security');
 const { isValidAvatar } = require('../images');
 const serialize = require('../serializers');
 const { loadAccountData } = require('../account');
@@ -15,18 +15,22 @@ const googleClient = new OAuth2Client(config.googleClientId);
 const initialsAvatar = (seed, color) =>
   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed)}&backgroundColor=${color}&textColor=ffffff`;
 
-const normalizeEmail = email => String(email || '').trim().toLowerCase();
-const looksLikeEmail = email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+// Senha errada demais trava o login por 15 minutos: 8 tentativas por conta em
+// cada rede e 30 por conta no total (para quem troca de rede a cada tentativa).
+// Quem acerta a senha não gasta tentativa.
+const LOGIN_BLOCKED = 'Muitas tentativas de senha. Aguarde alguns minutos e tente de novo.';
+const loginPerNetwork = attempts({ name: 'login', max: 8, message: LOGIN_BLOCKED });
+const loginPerAccount = attempts({ name: 'login-conta', max: 30, message: LOGIN_BLOCKED });
 
-// Trava tentativas de senha por e-mail+IP; um login certo zera a contagem.
-const limitLogin = rateLimit({
-  name: 'login', windowMs: 15 * 60 * 1000, max: 8,
-  by: req => normalizeEmail(req.body && req.body.email),
-  message: 'Muitas tentativas de senha. Aguarde alguns minutos e tente de novo.',
+// Cadastros e logins do Google em massa vindos da mesma rede.
+const limitSignup = rateLimit({
+  name: 'cadastro', windowMs: 60 * 60 * 1000, max: 30,
+  message: 'Muitos cadastros vindos desta rede. Tente de novo mais tarde.',
 });
+const limitGoogle = rateLimit({ name: 'google', max: 60 });
 
 // Foto do Google em tamanho maior (o padrão vem com 96px).
-const largeGooglePhoto = url => (url ? url.replace(/=s\d+(-c)?$/, '=s256-c') : null);
+const largeGooglePhoto = url => (/^https:\/\//.test(url || '') ? url.replace(/=s\d+(-c)?$/, '=s256-c') : null);
 
 // Responde com a sessão. A mensagem de boas-vindas só é liberada uma vez por
 // conta: o mesmo comando que a libera já marca como vista no banco.
@@ -38,7 +42,7 @@ async function sendSession(res, userRow, isNewUser) {
     loadAccountData(userRow.id).catch(() => null),   // se falhar, o app busca depois
   ]);
   res.json({
-    token: signToken(userRow.id),
+    token: signToken(userRow.id, userRow.token_version),
     user: serialize.user(userRow),
     isNewUser,
     showWelcome: welcome.rowCount === 1,
@@ -99,30 +103,38 @@ async function upsertGoogleUser({ name, email, picture }) {
   return { row, isNewUser: true };
 }
 
-router.post('/login', limitLogin, asyncHandler(async (req, res) => {
+router.post('/login', asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || '');
   if (!email || !password) throw new HttpError(400, 'Preencha e-mail e senha para continuar.');
+  if (!looksLikeEmail(email)) throw new HttpError(400, 'Digite um e-mail válido.');
+  const network = `${clientIp(req)}:${email}`;
+  loginPerNetwork.take(network);
+  loginPerAccount.take(email);
 
   const { rows } = await query('SELECT * FROM users WHERE email = $1', [email]);
   const user = rows[0];
   if (user && user.google_account && !user.password_hash) {
     throw new HttpError(401, 'Esta conta usa login do Google. Entre pelo botão do Google.');
   }
-  if (!user || !(await checkPassword(password, user.password_hash))) {
-    throw new HttpError(401, 'E-mail ou senha incorretos.');
+  // Mensagens separadas: ajuda quem errou o e-mail a perceber o engano.
+  if (!user) throw new HttpError(401, 'Não encontramos nenhuma conta com esse e-mail.');
+  if (!(await checkPassword(password, user.password_hash))) {
+    throw new HttpError(401, 'Senha incorreta. Tente de novo.');
   }
-  clearLimit('login', req, email);   // senha certa: a pessoa não fica presa no limite
+  loginPerNetwork.refund(network);
+  loginPerAccount.refund(email);
   await sendSession(res, user, false);
 }));
 
-router.post('/signup', asyncHandler(async (req, res) => {
+router.post('/signup', limitSignup, asyncHandler(async (req, res) => {
   const name = String(req.body.name || '').trim();
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || '');
   if (!name || !email || !password) throw new HttpError(400, 'Preencha todos os campos.');
+  assertName(name);
   if (!looksLikeEmail(email)) throw new HttpError(400, 'Digite um e-mail válido.');
-  if (password.length < 6) throw new HttpError(400, 'A senha precisa ter pelo menos 6 caracteres.');
+  assertNewPassword(password);
 
   const exists = await query('SELECT 1 FROM users WHERE email = $1', [email]);
   if (exists.rowCount) throw new HttpError(409, 'Já existe uma conta com este e-mail.');
@@ -139,7 +151,7 @@ router.post('/signup', asyncHandler(async (req, res) => {
 }));
 
 // Recebe o ID Token (JWT) do Google e valida a assinatura no servidor.
-router.post('/google', asyncHandler(async (req, res) => {
+router.post('/google', limitGoogle, asyncHandler(async (req, res) => {
   if (!config.googleClientId) throw new HttpError(503, 'Login com Google não configurado no servidor.');
   let payload;
   try {
@@ -148,10 +160,13 @@ router.post('/google', asyncHandler(async (req, res) => {
   } catch {
     throw new HttpError(401, 'Não foi possível ler os dados da sua conta Google.');
   }
-  if (!payload || !payload.email) throw new HttpError(401, 'Não foi possível ler os dados da sua conta Google.');
+  // Só vale e-mail que o Google confirmou ser da pessoa: é ele que liga o login à conta.
+  if (!payload || !payload.email || payload.email_verified !== true) {
+    throw new HttpError(401, 'Não foi possível ler os dados da sua conta Google.');
+  }
 
   const profile = {
-    name: payload.name || payload.email.split('@')[0],
+    name: String(payload.name || payload.email.split('@')[0]).slice(0, 80),
     email: normalizeEmail(payload.email),
     picture: largeGooglePhoto(payload.picture),
   };
@@ -166,7 +181,7 @@ router.post('/google', asyncHandler(async (req, res) => {
 
 // "Usar conta demo" — só existe enquanto o login real do Google não estiver configurado.
 // Usa sempre a mesma conta, para que dados e mensagem de boas-vindas se comportem como numa conta real.
-router.post('/google-demo', asyncHandler(async (req, res) => {
+router.post('/google-demo', limitGoogle, asyncHandler(async (req, res) => {
   if (!config.allowDemoGoogle) throw new HttpError(403, 'Conta demo desativada.');
   const profile = { name: 'Conta Demo Google', email: 'demo.google@trifarmas.app', picture: null };
   // Mesma regra do login real: pela tela inicial, sem conta criada, vai para o cadastro.

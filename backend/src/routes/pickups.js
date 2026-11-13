@@ -7,12 +7,13 @@
 // O acesso é protegido por uma senha única (PHARMACY_PIN). Num sistema real,
 // cada farmácia teria sua própria conta; aqui a senha é a mesma para todas.
 
+const crypto = require('crypto');
 const express = require('express');
 const config = require('../config');
 const { query, transaction } = require('../db');
 const { HttpError, asyncHandler } = require('../errors');
 const { addPoints } = require('../points');
-const { rateLimit } = require('../security');
+const { rateLimit, attempts, clientIp } = require('../security');
 const serialize = require('../serializers');
 
 const router = express.Router();
@@ -22,12 +23,28 @@ const limitPickup = rateLimit({
   message: 'Muitas tentativas de código. Aguarde alguns minutos.',
 });
 
+// Senha errada demais trava o painel por 15 minutos: 10 por rede e 100 no
+// total (para quem troca de rede a cada tentativa). Quem acerta não gasta tentativa.
+const PIN_BLOCKED = 'Muitas senhas erradas. O painel volta a aceitar tentativas em alguns minutos.';
+const pinPerNetwork = attempts({ name: 'pin', max: 10, message: PIN_BLOCKED });
+const pinOverall = attempts({ name: 'pin-geral', max: 100, message: PIN_BLOCKED });
+
+// Compara em tempo constante: o tempo de resposta não entrega quantos
+// caracteres da senha estão certos.
+const digest = value => crypto.createHash('sha256').update(value).digest();
+const samePin = pin => crypto.timingSafeEqual(digest(pin), digest(config.pharmacyPin));
+
 function requirePin(req) {
   if (!config.pharmacyPin) {
     throw new HttpError(503, 'Painel da farmácia não configurado neste servidor (defina PHARMACY_PIN).');
   }
   const pin = String(req.body && req.body.pin || req.get('x-pharmacy-pin') || '');
-  if (pin !== config.pharmacyPin) throw new HttpError(401, 'Senha do painel incorreta.');
+  const network = clientIp(req);
+  pinPerNetwork.take(network);
+  pinOverall.take('todos');
+  if (!samePin(pin)) throw new HttpError(401, 'Senha do painel incorreta.');
+  pinPerNetwork.refund(network);
+  pinOverall.refund('todos');
 }
 
 const cleanCode = value => String(value || '').replace(/\D/g, '');

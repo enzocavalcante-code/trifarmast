@@ -74,8 +74,8 @@ async function enterCounter(){
     await api.pickupLookup('000000', pin);
     acceptPin(pin);                       // improvável, mas o código existia
   }catch(e){
-    // "Código não encontrado" significa que a senha passou.
-    if(/não encontrado/i.test(e.message)) acceptPin(pin);
+    // 404 (código não encontrado) significa que a senha passou.
+    if(e.status === 404) acceptPin(pin);
     else showError('counter-error', e.message);
   }
 }
@@ -120,7 +120,7 @@ async function lookupOrder(){
   }catch(e){
     currentOrder = null;
     showError('counter-lookup-error', e.message);
-    if(/senha/i.test(e.message)) leaveCounter();
+    if(e.status === 401){ leaveCounter(); showError('counter-error', e.message); }
   }finally{
     button.disabled = false;
     button.textContent = 'Conferir pedido';

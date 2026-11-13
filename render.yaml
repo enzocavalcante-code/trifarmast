@@ -16,10 +16,12 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     envVars:
+      # O banco gratuito do Render expira em 30 dias. Para não perder os dados,
+      # use um banco do Neon (neon.com, gratuito e sem prazo) e cole a connection
+      # string dele no painel (Environment > DATABASE_URL). Fica como
+      # "sync: false" para o blueprint nunca sobrescrever esse valor.
       - key: DATABASE_URL
-        fromDatabase:
-          name: trifarmas-db
-          property: connectionString
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: GOOGLE_CLIENT_ID
@@ -27,6 +29,4 @@ services:
       - key: CORS_ORIGINS
         sync: false   # preencha com a URL do Vercel, ex: https://trifarmas.vercel.app
       - key: PHARMACY_PIN
-        sync: false   # senha do balcão da farmácia (frontend/farmacia.html)
-      - key: ALLOW_DEMO_GOOGLE
-        value: "true"
+        sync: false   # senha do balcão da farmácia (frontend/farmacia.html): 6 caracteres ou mais

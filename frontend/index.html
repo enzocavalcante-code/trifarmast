@@ -17,6 +17,18 @@
 <body data-theme="light">
 
 <!-- ============ AUTH: LOGIN ============ -->
+<!-- Mostrada enquanto a sessão guardada no aparelho é reconectada, para a
+     pessoa não ver a tela de login piscar ao atualizar a página. -->
+<div id="view-loading" class="auth-wrap hidden">
+  <div class="auth-card loading-card">
+    <div class="auth-logo">
+      <img class="app-logo-img wordmark" alt="Trifarmas">
+    </div>
+    <div class="loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+    <p id="loading-msg" class="loading-msg">Entrando…</p>
+  </div>
+</div>
+
 <div id="view-login" class="auth-wrap">
   <div class="auth-card">
     <div class="auth-logo">
@@ -53,7 +65,7 @@
     <div class="field"><label for="signup-email">E-mail</label><input id="signup-email" type="email" autocomplete="email" placeholder="voce@email.com"></div>
     <div class="field"><label for="signup-pass">Senha</label>
       <div class="pass-wrap">
-        <input id="signup-pass" type="password" autocomplete="new-password" placeholder="Mínimo de 6 caracteres" onkeydown="if(event.key==='Enter') doSignup()">
+        <input id="signup-pass" type="password" autocomplete="new-password" placeholder="Mínimo de 8 caracteres" onkeydown="if(event.key==='Enter') doSignup()">
         <button type="button" class="pass-toggle" data-for="signup-pass" onclick="togglePassword(this)" aria-label="Mostrar senha" title="Mostrar senha"></button>
       </div>
     </div>

@@ -1,8 +1,12 @@
 const express = require('express');
 const { HttpError, asyncHandler } = require('../errors');
 const geo = require('../geo');
+const { rateLimit, clientIp } = require('../security');
 
 const router = express.Router();
+
+// Cada busca vira consulta a serviços de mapa de terceiros: limite por conta.
+router.use(rateLimit({ name: 'mapa', windowMs: 10 * 60 * 1000, max: 120, key: req => req.userId }));
 
 function readCoords(q) {
   const lat = Number(q.lat);
@@ -45,7 +49,7 @@ router.get('/search', asyncHandler(async (req, res) => {
 
 // Localização aproximada pela conexão de internet (quando o GPS não está disponível).
 router.get('/approximate', asyncHandler(async (req, res) => {
-  const ip = String(req.ip || '').replace(/^::ffff:/, '');
+  const ip = clientIp(req).replace(/^::ffff:/, '');
   let place = null;
   try {
     place = await geo.approximateLocation(ip);

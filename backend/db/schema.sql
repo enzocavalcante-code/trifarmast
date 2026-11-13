@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS google_picture TEXT;                          -- última foto vinda do Google
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_custom  BOOLEAN NOT NULL DEFAULT FALSE; -- TRUE = usuário escolheu a foto manualmente
+ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version  INTEGER NOT NULL DEFAULT 0;     -- sobe a cada troca de senha: derruba as sessões antigas
 
 DO $$ BEGIN
   ALTER TABLE medicines

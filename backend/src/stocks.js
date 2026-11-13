@@ -5,6 +5,7 @@ const { query } = require('./db');
 
 const UNIT_LABELS = ['comprimidos', 'cápsulas', 'doses', 'ml', 'gotas'];
 const MAX_UNITS = 9999;
+const MAX_STOCKS = 300;   // remédios diferentes por conta
 
 // Chave de comparação: sem acento, sem espaços repetidos, em minúsculas.
 const medKey = name => String(name || '')
@@ -47,6 +48,10 @@ async function saveStock(userId, { med, units, perDose, unitLabel: label }) {
   const key = medKey(name);
   const amount = clampUnits(units);
   if (!key || amount === null) return null;
+  const { rows: [{ total }] } = await query(
+    'SELECT COUNT(*)::int AS total FROM med_stocks WHERE user_id = $1 AND med_key <> $2', [userId, key]
+  );
+  if (total >= MAX_STOCKS) return null;
   const { rows } = await query(
     `INSERT INTO med_stocks (user_id, medicine, med_key, units, unit_label, per_dose)
      VALUES ($1,$2,$3,$4,$5,$6)
