@@ -1,6 +1,8 @@
-<div align="center">  <img src="frontend/assets/logo.png" alt="Trifarmas" width="300"> </div>
-<br>
 <div align="center">
+  <img src="frontend/assets/logo.png" alt="Trifarmas" width="300">
+
+  <p>Compare the price of the same medicine across pharmacies and find the cheapest one near you.</p>
+
   <img src="https://img.shields.io/badge/license-MIT-1e8a4c?style=for-the-badge" alt="MIT License">
   <img src="https://img.shields.io/badge/javascript-f7df1e?style=for-the-badge&logo=javascript&logoColor=000000" alt="JavaScript">
   <img src="https://img.shields.io/badge/node.js-5fa04e?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js">
@@ -8,8 +10,15 @@
   <img src="https://img.shields.io/badge/vercel-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel">
   <img src="https://img.shields.io/badge/render-5a4fcf?style=for-the-badge&logo=render&logoColor=white" alt="Render">
 
+  <p>
+    <a href="#features">Features</a> ·
+    <a href="#getting-started">Getting started</a> ·
+    <a href="#deployment">Deployment</a> ·
+    <a href="#security">Security</a> ·
+    <a href="#team">Team</a>
+  </p>
 </div>
-<br>
+
 <img src="frontend/assets/preview.png" alt="Trifarmas screens: medicine search, reminders and orders">
 
 ## Features
@@ -23,7 +32,7 @@
 | Reminders | Medicine schedule and a warning when your supply at home is running low |
 | Map | Real pharmacies nearby, by GPS or by postal code (CEP) |
 | Points | 1 point per R$ 1 spent, redeemable for discount coupons |
-| Counter | The pharmacy confirms pickups at `farmacia.html` |
+| Counter | The pharmacy confirms pickups at `pharmacy.html` |
 
 **Next steps:** real prices (CMED table), real Pix payments, AI prescription reading and Android/iOS apps.
 
@@ -78,7 +87,7 @@ Tests live in `backend/test/` and run with `npm test`.
 <table>
   <tr>
     <td align="center">
-      <img src="frontend/assets/logo-time-white-big.png" alt="Trifarmas" width="100px">
+      <img src="frontend/assets/logo-team-white-big.png" alt="Trifarmas" width="100px">
     </td>
     <td align="center">
       <a href="https://github.com/vhko20" title="GitHub profile">

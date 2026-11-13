@@ -93,7 +93,7 @@ const api = (() => {
     geocode: q => get(`/places/search?q=${encodeURIComponent(q)}`),
     approximateLocation: () => get('/places/approximate'),
 
-    // Balcão da farmácia (farmacia.html): autentica pela senha do painel, sem conta
+    // Balcão da farmácia (pharmacy.html): autentica pela senha do painel, sem conta
     pickupLookup: (code, pin) => post('/pickups/lookup', { code, pin }),
     pickupConfirm: (code, pin) => post('/pickups/confirm', { code, pin }),
 

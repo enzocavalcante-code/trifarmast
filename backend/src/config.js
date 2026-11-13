@@ -14,7 +14,7 @@ const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   // Origens autorizadas a chamar a API (URL do Vercel, localhost...), separadas por vírgula.
   corsOrigins: (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
-  // Senha única do painel do balcão (frontend/farmacia.html).
+  // Senha única do painel do balcão (frontend/pharmacy.html).
   pharmacyPin: process.env.PHARMACY_PIN || '',
   // Quantos servidores intermediários ficam na frente da API (o padrão das
   // hospedagens é 1). É daí que sai o IP de quem chamou — ver security.js.

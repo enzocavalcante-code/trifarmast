@@ -29,4 +29,4 @@ services:
       - key: CORS_ORIGINS
         sync: false   # preencha com a URL do Vercel, ex: https://trifarmas.vercel.app
       - key: PHARMACY_PIN
-        sync: false   # senha do balcão da farmácia (frontend/farmacia.html): 6 caracteres ou mais
+        sync: false   # senha do balcão da farmácia (frontend/pharmacy.html): 6 caracteres ou mais

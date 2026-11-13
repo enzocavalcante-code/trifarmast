@@ -8,7 +8,7 @@ const CACHE = 'trifarmas-v2';
 const SHELL = [
   './',
   'index.html',
-  'farmacia.html',
+  'pharmacy.html',
   'styles.css',
   'config.js',
   'api.js',
@@ -19,7 +19,7 @@ const SHELL = [
   'orders.js',
   'scan-select.js',
   'pwa.js',
-  'farmacia.js',
+  'pharmacy.js',
   'manifest.webmanifest',
   'assets/logo.png',
   'assets/favicon.png',

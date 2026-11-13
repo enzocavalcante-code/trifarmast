@@ -19,6 +19,6 @@
   "shortcuts": [
     { "name": "Buscar remédio", "url": "index.html#buscar" },
     { "name": "Meus pedidos", "url": "index.html#pedidos" },
-    { "name": "Painel da farmácia", "url": "farmacia.html" }
+    { "name": "Painel da farmácia", "url": "pharmacy.html" }
   ]
 }

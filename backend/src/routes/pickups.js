@@ -1,4 +1,4 @@
-// Painel da farmácia (frontend/farmacia.html).
+// Painel da farmácia (frontend/pharmacy.html).
 //
 // Quem está no balcão digita o código do pedido para conferir o que entregar e
 // confirmar a retirada. É essa confirmação que credita os pontos do cliente —
