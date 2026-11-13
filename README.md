@@ -1,7 +1,7 @@
+<div align="center">  <img src="frontend/assets/logo.png" alt="Trifarmas" width="300"> </div>
+<br>
 <div align="center">
   <img src="frontend/assets/logo.png" alt="Trifarmas" width="300">
-
-  <p>Compare the price of the same medicine across pharmacies and find the cheapest one near you.</p>
 
   <img src="https://img.shields.io/badge/license-MIT-1e8a4c?style=for-the-badge" alt="MIT License">
   <img src="https://img.shields.io/badge/javascript-f7df1e?style=for-the-badge&logo=javascript&logoColor=000000" alt="JavaScript">
@@ -10,13 +10,7 @@
   <img src="https://img.shields.io/badge/vercel-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel">
   <img src="https://img.shields.io/badge/render-5a4fcf?style=for-the-badge&logo=render&logoColor=white" alt="Render">
 
-  <p>
-    <a href="#features">Features</a> ·
-    <a href="#getting-started">Getting started</a> ·
-    <a href="#deployment">Deployment</a> ·
-    <a href="#security">Security</a> ·
-    <a href="#team">Team</a>
-  </p>
+
 </div>
 
 <img src="frontend/assets/preview.png" alt="Trifarmas screens: medicine search, reminders and orders">
