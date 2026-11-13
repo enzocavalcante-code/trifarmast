@@ -11,7 +11,7 @@
 
 
 </div>
-
+<br>
 <img src="frontend/assets/preview.png" alt="Trifarmas screens: medicine search, reminders and orders">
 
 ## Features
