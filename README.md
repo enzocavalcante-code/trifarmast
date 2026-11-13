@@ -1,4 +1,4 @@
-<div align="center"   <img src="frontend/assets/logo.png" alt="Trifarmas" width="300"> </div>
+<div align="center">  <img src="frontend/assets/logo.png" alt="Trifarmas" width="300"> </div>
 <div align="center">
   <img src="https://img.shields.io/badge/license-MIT-1e8a4c?style=for-the-badge" alt="MIT License">
   <img src="https://img.shields.io/badge/javascript-f7df1e?style=for-the-badge&logo=javascript&logoColor=000000" alt="JavaScript">
