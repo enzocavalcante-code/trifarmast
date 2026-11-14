@@ -1,5 +1,3 @@
-# Blueprint do Render: cria o banco PostgreSQL e a API Node de uma vez.
-# No Render: New + > Blueprint > selecione o repositório (este arquivo fica na raiz).
 databases:
   - name: trifarmas-db
     plan: free
@@ -16,10 +14,6 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     envVars:
-      # O banco gratuito do Render expira em 30 dias. Para não perder os dados,
-      # use um banco do Neon (neon.com, gratuito e sem prazo) e cole a connection
-      # string dele no painel (Environment > DATABASE_URL). Fica como
-      # "sync: false" para o blueprint nunca sobrescrever esse valor.
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
@@ -27,6 +21,6 @@ services:
       - key: GOOGLE_CLIENT_ID
         value: 798411665059-b1fhn4gfljnsi3efm3o9lacudd11a4f2.apps.googleusercontent.com
       - key: CORS_ORIGINS
-        sync: false   # preencha com a URL do Vercel, ex: https://trifarmas.vercel.app
+        sync: false   
       - key: PHARMACY_PIN
         sync: false   # senha do balcão da farmácia (frontend/pharmacy.html): 6 caracteres ou mais
