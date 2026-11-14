@@ -1,9 +1,5 @@
-// Histórico de preços e alertas "avise quando baixar".
-
 const HISTORY_DAYS = 60;
 
-// Cria um aviso para cada alerta cujo preço-alvo foi atingido e marca o alerta
-// como avisado. Roda a cada inicialização, depois de atualizar os preços.
 async function checkPriceAlerts(db) {
   const { rows } = await db.query(`
     WITH low AS (
@@ -28,7 +24,6 @@ async function checkPriceAlerts(db) {
   return rows.length;
 }
 
-// Menor preço por dia (entre todas as farmácias) para o gráfico do remédio.
 async function priceHistory(db, medicineId) {
   const { rows } = await db.query(
     `SELECT day, MIN(price) AS min_price, MAX(price) AS max_price

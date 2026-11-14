@@ -7,12 +7,10 @@ const { loadPoints } = require('../account');
 
 const router = express.Router();
 
-// Resumo do programa de pontos: saldo, pontos a receber, cupons e extrato.
 router.get('/', asyncHandler(async (req, res) => {
   res.json(await loadPoints(req.userId));
 }));
 
-// Troca pontos por um cupom de desconto.
 router.post('/rewards/:id/redeem', asyncHandler(async (req, res) => {
   const result = await transaction(async client => {
     const { rows: [reward] } = await client.query('SELECT * FROM rewards WHERE id = $1', [req.params.id]);

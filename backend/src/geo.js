@@ -1,5 +1,3 @@
-// Busca de farmácias e endereços (OpenStreetMap), feita pelo servidor.
-//
 // Por que no servidor: os servidores públicos do OpenStreetMap ficam sobrecarregados
 // com frequência. Aqui dá para tentar vários servidores, usar uma segunda fonte se
 // todos falharem, identificar o app corretamente e guardar resultados em cache.
@@ -15,12 +13,10 @@ const OVERPASS_ENDPOINTS = [
 const NOMINATIM = 'https://nominatim.openstreetmap.org';
 const PHOTON = 'https://photon.komoot.io';
 
-const NEAR_RADII_M = [4000, 8000];     // amplia a busca se houver poucas farmácias
+const NEAR_RADII_M = [4000, 8000];
 const MIN_RESULTS = 5;
 const CACHE_TTL_MS = 30 * 60 * 1000;
 const CACHE_MAX = 500;
-
-/* ---------------- utilidades ---------------- */
 
 const cache = new Map();
 function cached(key, ttl, producer) {
@@ -52,8 +48,6 @@ function haversineKm(a, b) {
 }
 
 const round = (n, digits) => Number(n).toFixed(digits);
-
-/* ---------------- farmácias próximas ---------------- */
 
 function fromOverpass(el) {
   const lat = el.lat ?? (el.center && el.center.lat);
@@ -94,7 +88,6 @@ async function overpassPharmacies(center, radiusM, deadline) {
   throw lastError;
 }
 
-// Segunda fonte: busca de "farmácia" no Nominatim dentro de um retângulo ao redor do ponto.
 async function nominatimPharmacies(center, radiusM) {
   const dLat = radiusM / 111000;
   const dLng = radiusM / (111000 * Math.cos(center.lat * Math.PI / 180));
@@ -128,7 +121,7 @@ async function findPharmacies(center) {
       radiusM = r;
       if (list.length >= MIN_RESULTS) break;
     } catch {
-      break; // mantém o que já encontrou no raio menor
+      break;
     }
   }
   if (!list.length) {
@@ -154,8 +147,6 @@ function nearbyPharmacies(lat, lng) {
   return cached(`pharm:${center.lat},${center.lng}`, CACHE_TTL_MS, () => findPharmacies(center));
 }
 
-/* ---------------- endereço ---------------- */
-
 function labelFromAddress(a, fallback) {
   const street = [a.road || a.street, a.house_number || a.housenumber].filter(Boolean).join(', ');
   const area = a.suburb || a.neighbourhood || a.district || a.city_district || '';
@@ -177,7 +168,6 @@ async function reverseGeocode(lat, lng) {
   });
 }
 
-// Aceita CEP (com ou sem hífen) ou endereço livre. Tenta ViaCEP → Nominatim → Photon.
 async function geocode(text) {
   const raw = String(text || '').trim().slice(0, 200);
   const key = `geo:${raw.toLowerCase()}`;
@@ -193,7 +183,7 @@ async function geocode(text) {
         if (via.erro) return null;
         queryText = [via.logradouro, via.bairro, via.localidade, via.uf].filter(Boolean).join(', ');
         label = [via.logradouro, via.bairro, `${via.localidade}/${via.uf}`].filter(Boolean).join(' · ');
-      } catch { /* segue só com o CEP */ }
+      } catch {}
     }
 
     const attempts = [];
@@ -208,7 +198,6 @@ async function geocode(text) {
       });
     }
     attempts.push(async () => {
-      // Photon: viés para o centro do Brasil, filtra resultados do país.
       const r = await fetchJson(`${PHOTON}/api/?q=${encodeURIComponent(queryText + ', Brasil')}&limit=5&lat=-15.8&lon=-47.9`, { timeoutMs: 8000 });
       const f = (r.features || []).find(x => (x.properties.countrycode || '').toUpperCase() === 'BR');
       return f && { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], label: label || labelFromAddress(f.properties, f.properties.name) };
@@ -218,15 +207,12 @@ async function geocode(text) {
       try {
         const found = await attempt();
         if (found) return found;
-      } catch { /* tenta a próxima fonte */ }
+      } catch {}
     }
     return null;
   });
 }
 
-/* ---------------- localização aproximada pela internet (IP) ---------------- */
-
-// Usada quando o GPS do aparelho está bloqueado ou indisponível. Precisão de bairro/cidade.
 function isPublicIp(ip) {
   if (!ip) return false;
   if (/^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(ip)) return false;
@@ -262,7 +248,7 @@ async function approximateLocation(ip) {
             country: found.country || '',
           };
         }
-      } catch { /* tenta o próximo serviço */ }
+      } catch {}
     }
     throw new Error('Serviços de localização por IP indisponíveis');
   });

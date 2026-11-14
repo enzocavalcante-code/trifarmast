@@ -16,7 +16,6 @@ pool.on('error', err => console.error('Conexão ociosa com o banco caiu:', err.m
 
 const query = (text, params) => pool.query(text, params);
 
-// Executa uma função dentro de uma transação (BEGIN / COMMIT / ROLLBACK).
 async function transaction(fn) {
   const client = await pool.connect();
   try {
@@ -32,7 +31,6 @@ async function transaction(fn) {
   }
 }
 
-// Cria as tabelas (se não existirem) e popula o catálogo inicial.
 async function migrate() {
   const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8');
   await pool.query(schema);

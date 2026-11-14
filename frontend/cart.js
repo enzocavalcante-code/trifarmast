@@ -1,11 +1,3 @@
-/* =============================================================
-   Carrinho e pagamento (tela cheia, em 2 etapas)
-   - Vários remédios por pedido, retirados na mesma farmácia
-   - Compara o total do carrinho em cada farmácia
-   - Pagamento com cupom de pontos
-   O carrinho fica salvo neste aparelho (por conta) até o pedido ser feito.
-   ============================================================= */
-
 const MAX_QTY = 10;
 const ICON_PIX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l4.5 4.5-4.5 4.5-4.5-4.5zM12 13l4.5 4.5L12 22l-4.5-4.5zM2 12l4.5-4.5L11 12l-4.5 4.5zM13 12l4.5-4.5L22 12l-4.5 4.5z"/></svg>';
 const ICON_CARD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>';
@@ -13,7 +5,6 @@ const ICON_CASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const ICON_STORE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l1.5-5h15L21 9M4 9h16v10a1 1 0 01-1 1H5a1 1 0 01-1-1V9z"/><path d="M9 20v-6h6v6"/></svg>';
 const ICON_MOTO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/><path d="M8 17h8l-3.5-6H16l-2-3h-3"/><path d="M5 17l3.5-6H6"/><path d="M14 8h4"/></svg>';
 
-// Formas de pagamento (a opção em dinheiro muda conforme entrega ou retirada).
 function paymentOptions(){
   const delivery = checkout.fulfillment === 'delivery';
   return [
@@ -30,16 +21,13 @@ const checkout = {
   open: false, step: 'cart', paymentMethod: 'Pix', couponId: null, submitting: false,
   fulfillment: 'pickup',   // 'pickup' = retirar na farmácia | 'delivery' = motoboy
   address: '', complement: '',
-  addressPoint: null,      // { lat, lng, label, source } do endereço confirmado
+  addressPoint: null,
   addressStatus: 'idle',   // idle | loading | ok | error
   addressFrom: 'none',     // none | saved | gps | typed — de onde veio o texto do campo
   addressError: '',
 };
 
-/* ---------------- entrega por motoboy ----------------
-   A taxa só existe depois que a pessoa informa o endereço: é a distância entre
-   esse endereço e a farmácia que define o preço (base até 2 km + valor por km),
-   a mesma conta que o servidor refaz na hora de criar o pedido. */
+/* A taxa depende do endereço; o servidor refaz a mesma conta ao criar o pedido. */
 
 // Usada enquanto o catálogo não carregou (o servidor manda a tabela oficial).
 const DEFAULT_DELIVERY_RULES = {
@@ -49,33 +37,28 @@ const DEFAULT_DELIVERY_RULES = {
 const deliveryRules = () => (state.catalog.delivery && state.catalog.delivery.perKm)
   ? state.catalog.delivery : DEFAULT_DELIVERY_RULES;
 
-// Distância do endereço informado até a loja. Sem endereço confirmado, null.
 function deliveryDistanceKm(pharm){
   if(!pharm || !checkout.addressPoint) return null;
   const point = checkout.addressPoint;
   const match = typeof loc !== 'undefined' && loc.chainMatches ? loc.chainMatches[pharm.id] : null;
-  // Só mede a distância real quando conhecemos os dois pontos no mapa.
   if(Number.isFinite(point.lat) && match && Number.isFinite(match.lat) && typeof haversineKm === 'function'){
     return Math.round(haversineKm(point, match) * 100) / 100;
   }
-  // Sem a loja real no mapa: usa a distância aproximada do catálogo.
   return Number.isFinite(pharm.dist) ? pharm.dist : null;
 }
 
-// Taxa e prazo da entrega nesta farmácia (mesma conta do servidor).
 function deliveryQuote(pharm){
   const rules = deliveryRules();
   const km = deliveryDistanceKm(pharm);
-  if(km == null) return null;                       // ainda sem endereço
+  if(km == null) return null;
   if(km > rules.maxKm) return { km, outOfRange: true, maxKm: rules.maxKm };
-  const extraKm = Math.max(0, Math.ceil(km - rules.baseKm));   // por km iniciado
+  const extraKm = Math.max(0, Math.ceil(km - rules.baseKm));
   const fee = Math.round((rules.baseFee + extraKm * rules.perKm) * 100) / 100;
   const minutes = Math.min(rules.maxMinutes,
     Math.max(rules.minMinutes, Math.round(rules.prepMinutes + km * rules.minutesPerKm)));
   return { km, fee, minutes, extraKm, baseFee: rules.baseFee, baseKm: rules.baseKm, perKm: rules.perKm, outOfRange: false };
 }
 
-// Explicação da conta, para a taxa não parecer um número tirado do nada.
 function deliveryFeeBreakdown(quote){
   if(!quote || quote.outOfRange) return '';
   const rules = deliveryRules();
@@ -94,7 +77,6 @@ const deliveryFee = () => {
 
 const addressKey = () => `trifarmas-address:${state.user ? state.user.email : ''}`;
 
-// Endereço completo que vai para o pedido (endereço + complemento).
 function fullDeliveryAddress(){
   const address = (checkout.address || '').trim();
   const complement = (checkout.complement || '').trim();
@@ -110,7 +92,6 @@ function setFulfillment(mode){
      && checkout.address.trim().length >= 8){
     locateDeliveryAddress();
   }
-  // A opção "Dinheiro" muda de nome: mantém a escolha válida nos dois casos.
   if(/^Dinheiro/.test(checkout.paymentMethod)){
     checkout.paymentMethod = mode === 'delivery' ? 'Dinheiro na entrega' : 'Dinheiro na retirada';
   }
@@ -127,7 +108,6 @@ function onAddressInput(field, value){
   if(warn && fullDeliveryAddress().trim().length >= 8) warn.classList.add('hidden');
   if(field !== 'address') return;
 
-  // Endereço mudou: a taxa antiga não vale mais.
   checkout.addressPoint = null;
   checkout.addressStatus = 'idle';
   checkout.addressError = '';
@@ -138,7 +118,6 @@ function onAddressInput(field, value){
   }
 }
 
-// Procura o endereço no mapa para medir a distância até a farmácia.
 async function locateDeliveryAddress({ silent = true } = {}){
   const address = checkout.address.trim();
   clearTimeout(addressDebounce);
@@ -153,7 +132,7 @@ async function locateDeliveryAddress({ silent = true } = {}){
   renderDeliveryQuoteLine();
   try{
     const place = await api.geocode(address);
-    if(checkout.address.trim() !== requested) return null;     // já digitou outra coisa
+    if(checkout.address.trim() !== requested) return null;
     checkout.addressPoint = { lat: place.lat, lng: place.lng, label: place.label || address, source: 'address' };
     checkout.addressStatus = 'ok';
   }catch(e){
@@ -205,7 +184,6 @@ function deliveryQuoteLineHtml(){
   </div>`;
 }
 
-// Preenche o endereço pelo GPS. Se a localização ainda não foi lida, lê na hora.
 async function useMyLocationAddress(){
   if(typeof loc === 'undefined') return;
   if(!loc.coords || loc.source === 'ip'){
@@ -218,14 +196,13 @@ async function useMyLocationAddress(){
   }
   let address = loc.address;
   if(!address){
-    try{ address = (await api.reverseGeocode(loc.coords.lat, loc.coords.lng)).label; }catch{ /* segue sem endereço */ }
+    try{ address = (await api.reverseGeocode(loc.coords.lat, loc.coords.lng)).label; }catch{}
   }
   if(!address){
     showToast('Não consegui transformar sua localização em endereço. Digite a rua e o número.');
     return;
   }
   checkout.address = address;
-  // A localização já dá o ponto exato: a taxa sai na hora, sem procurar o endereço.
   checkout.addressPoint = { lat: loc.coords.lat, lng: loc.coords.lng, label: address, source: 'gps' };
   checkout.addressStatus = 'ok';
   checkout.addressError = '';
@@ -236,8 +213,6 @@ async function useMyLocationAddress(){
     : 'Endereço preenchido — confira o número da casa.');
 }
 
-/* ---------------- dados do carrinho ---------------- */
-
 const cartKey = () => `trifarmas-cart:${state.user ? state.user.email : ''}`;
 
 function loadCart(){
@@ -246,7 +221,6 @@ function loadCart(){
 }
 function saveCart(){ storage.set(cartKey(), state.cart); }
 
-// Itens válidos (remédios que ainda existem no catálogo).
 function cartLines(){
   return state.cart.items
     .map(i => ({ ...i, med: medById(i.medId) }))
@@ -255,7 +229,6 @@ function cartLines(){
 const cartQuantity = medId => (state.cart.items.find(i => i.medId === medId) || {}).qty || 0;
 const cartCount = () => cartLines().reduce((n, i) => n + i.qty, 0);
 
-// Total do carrinho numa farmácia (null se algum item não tiver preço lá).
 function cartTotalAt(pharmId){
   let total = 0;
   for(const line of cartLines()){
@@ -339,8 +312,6 @@ function updateCartUI(bump = false){
   $('cart-bar').classList.toggle('hidden', count === 0 || state.activeTab !== 'home' || checkout.open);
 }
 
-/* ---------------- tela cheia: carrinho → pagamento ---------------- */
-
 function openCart(){
   if(!state.cart.pharmacyId || cartTotalAt(state.cart.pharmacyId) == null){
     state.cart.pharmacyId = cheapestPharmacyForCart();
@@ -349,7 +320,6 @@ function openCart(){
   checkout.step = 'cart';
   checkout.couponId = null;
   checkout.submitting = false;
-  // Reaproveita o último endereço usado neste aparelho; senão, o da localização.
   const saved = storage.get(addressKey()) || {};
   if(!checkout.address){
     checkout.address = saved.address || (typeof loc !== 'undefined' && loc.address) || '';
@@ -390,8 +360,6 @@ function checkoutBack(){
 }
 
 async function goToStep(step){
-  // Sem endereço não dá para seguir: o motoboy precisa saber onde entregar,
-  // e é a distância até ele que define o valor da entrega.
   if(step === 'payment' && isDelivery()){
     if(fullDeliveryAddress().trim().length < 8){
       const warn = $('co-address-warn');
@@ -473,12 +441,10 @@ function rxNotice(lines){
   </div>`;
 }
 
-/* Escolha entre retirar na farmácia e receber por motoboy. */
 function renderFulfillmentStep(pharm){
   const quote = deliveryQuote(pharm);
   const delivery = isDelivery();
   const unavailable = quote && quote.outOfRange;
-  // Sem endereço não há valor: o preço depende da distância até a sua casa.
   const deliveryNote = checkout.addressStatus === 'loading' ? 'Calculando a taxa…'
     : !quote ? 'Informe seu endereço para ver o valor'
     : unavailable ? `Seu endereço fica a ${formatKm(quote.km)} (entregamos em até ${quote.maxKm} km)`
@@ -504,7 +470,6 @@ function renderFulfillmentStep(pharm){
   </section>`;
 }
 
-// Linha que mostra de onde veio o endereço: GPS exato, GPS fraco ou sem localização.
 function addressSourceHint(){
   if(typeof loc === 'undefined' || !loc.coords) return '';
   const pin = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
@@ -650,7 +615,6 @@ function renderPaymentStep(lines){
   const quote = delivery ? deliveryQuote(pharm) : null;
   const fee = deliveryFee();
   const total = Math.round((merchandise + fee) * 100) / 100;
-  // A taxa de entrega não vira pontos: só o valor dos remédios.
   const earn = Math.floor(merchandise);
   const coupons = state.pointsInfo.coupons;
 

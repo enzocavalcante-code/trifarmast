@@ -1,7 +1,4 @@
-/* Service worker do Trifarmas.
-   Guarda a casca do app (HTML, CSS, JS, ícones) para abrir rápido e funcionar
-   offline. Dados (API) nunca são guardados: preço e pedido precisam ser atuais.
-   Para publicar uma versão nova do site, troque o número do CACHE. */
+/* Dados da API nunca vão para o cache. Para publicar uma versão nova do site, troque o número do CACHE. */
 
 const CACHE = 'trifarmas-v2';
 
@@ -52,10 +49,8 @@ self.addEventListener('fetch', event => {
   const isApi = url.pathname.startsWith('/api/') || url.pathname === '/health';
   const sameOrigin = url.origin === self.location.origin;
 
-  // API, mapas e fontes: sempre da rede (nada de preço velho em cache).
   if (isApi || !sameOrigin) return;
 
-  // Navegação: tenta a rede e, sem internet, abre a versão guardada.
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request).catch(() => caches.match(request).then(hit => hit || caches.match('index.html')))
@@ -63,7 +58,6 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Arquivos do app: responde do cache e atualiza em segundo plano.
   event.respondWith(
     caches.match(request).then(hit => {
       const fromNetwork = fetch(request)
@@ -80,7 +74,6 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// Toque na notificação do lembrete: abre (ou foca) o app.
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   event.waitUntil(

@@ -16,9 +16,6 @@
 </head>
 <body data-theme="light">
 
-<!-- ============ AUTH: LOGIN ============ -->
-<!-- Mostrada enquanto a sessão guardada no aparelho é reconectada, para a
-     pessoa não ver a tela de login piscar ao atualizar a página. -->
 <div id="view-loading" class="auth-wrap hidden">
   <div class="auth-card loading-card">
     <div class="auth-logo">
@@ -53,13 +50,11 @@
   </div>
 </div>
 
-<!-- ============ AUTH: SIGNUP ============ -->
 <div id="view-signup" class="auth-wrap hidden">
   <div class="auth-card">
     <div class="auth-logo">
       <img class="app-logo-img wordmark" alt="Trifarmas">
     </div>
-    <!-- Aparece quando a pessoa tenta entrar com o Google sem ter conta ainda -->
     <div id="google-invite" class="google-invite hidden"></div>
     <div class="field"><label for="signup-name">Nome completo</label><input id="signup-name" type="text" autocomplete="name" placeholder="Seu nome"></div>
     <div class="field"><label for="signup-email">E-mail</label><input id="signup-email" type="email" autocomplete="email" placeholder="voce@email.com"></div>
@@ -80,7 +75,6 @@
   </div>
 </div>
 
-<!-- ============ APP ============ -->
 <div id="app" class="hidden">
   <div id="welcome-overlay" class="welcome-overlay hidden">
     <div class="welcome-popup">
@@ -111,7 +105,6 @@
     <div class="content">
      <div class="content-inner">
 
-      <!-- ---- HOME / BUSCAR ---- -->
       <section id="tab-home">
         <div class="section-head">
           <h2>Encontre o menor preço</h2>
@@ -132,7 +125,6 @@
         <div id="results-wrap"></div>
       </section>
 
-      <!-- ---- MAPA ---- -->
       <section id="tab-map" class="hidden">
         <div class="section-head"><h2>Farmácias próximas</h2><p>Use sua localização ou digite um endereço/CEP para ver as farmácias ao redor.</p></div>
         <div class="loc-bar">
@@ -159,7 +151,6 @@
         <div id="pharmacy-list" class="pharmacy-list"></div>
       </section>
 
-      <!-- ---- SCANNER ---- -->
       <section id="tab-scanner" class="hidden">
         <div class="section-head"><h2>Escanear remédio</h2><p>Aponte a câmera para o nome escrito na caixa (ou na receita) e toque em <b>Ler o remédio</b>.</p></div>
         <div class="scanner-frame" id="scanner-frame">
@@ -169,13 +160,11 @@
             <div class="scan-corner bl"></div><div class="scan-corner br"></div>
             <div class="scan-line"></div>
           </div>
-          <!-- Mensagem no lugar da imagem enquanto a câmera não está no ar -->
           <div class="scan-overlay" id="scan-overlay">
             <div class="scan-overlay-icon" id="scan-overlay-icon"></div>
             <p id="scan-overlay-text">Toque em “Ligar a câmera” para começar.</p>
             <button class="btn btn-primary" id="scan-overlay-btn" onclick="startScanner(true)">Ligar a câmera</button>
           </div>
-          <!-- Progresso da leitura do texto -->
           <div class="scan-progress hidden" id="scan-progress">
             <p id="scan-progress-text">Lendo o que está escrito…</p>
             <div class="scan-progress-track"><i id="scan-progress-bar"></i></div>
@@ -212,15 +201,12 @@
         </div>
       </section>
 
-      <!-- ---- LEMBRETES ---- -->
       <section id="tab-calendar" class="hidden">
         <div class="section-head"><h2>Lembretes de remédio</h2><p>É só responder três perguntas. Avisamos na hora certa — e quando o remédio estiver acabando.</p></div>
 
-        <!-- Aviso de reposição: aparece nos últimos dias do tratamento -->
         <div id="refill-alert" class="refill-alert hidden"></div>
 
         <div class="rem-wizard">
-          <!-- 1. remédio -->
           <div class="rem-step">
             <div class="rem-step-head"><span class="rem-step-num">1</span><h3>Qual remédio?</h3></div>
             <div class="rem-search">
@@ -233,7 +219,6 @@
             </div>
           </div>
 
-          <!-- 2. horário -->
           <div class="rem-step">
             <div class="rem-step-head"><span class="rem-step-num">2</span><h3>Que horas?</h3></div>
             <div class="time-picker">
@@ -251,7 +236,6 @@
             </label>
           </div>
 
-          <!-- 3. dia -->
           <div class="rem-step">
             <div class="rem-step-head"><span class="rem-step-num">3</span><h3>A partir de quando?</h3></div>
             <div class="rem-chips" id="rem-day-chips"></div>
@@ -269,7 +253,6 @@
             </div>
           </div>
 
-          <!-- 4. quantidade em casa -->
           <div class="rem-step">
             <div class="rem-step-head"><span class="rem-step-num">4</span><h3>Quantos você tem em casa?</h3></div>
             <p class="rem-step-help">Assim avisamos antes de acabar, com tempo de comprar mais.</p>
@@ -295,13 +278,11 @@
         <div class="rem-list" id="rem-list"></div>
       </section>
 
-      <!-- ---- PEDIDOS ---- -->
       <section id="tab-orders" class="hidden">
         <div class="section-head"><h2>Meus pedidos</h2><p>Acompanhe o motoboy no mapa e confirme a retirada ou o recebimento para ganhar seus pontos.</p></div>
         <div id="orders-list"></div>
       </section>
 
-      <!-- ---- PONTOS ---- -->
       <section id="tab-points" class="hidden">
         <div class="section-head"><h2>Meus pontos</h2><p>Ganhe pontos comprando pelo app e troque por cupons de desconto.</p></div>
         <div class="points-hero">
@@ -327,7 +308,6 @@
         <div id="points-history" class="points-history"></div>
       </section>
 
-      <!-- ---- CONFIGURAÇÕES ---- -->
       <section id="tab-settings" class="hidden">
         <div class="section-head settings-head"><h2>Configurações</h2><p>Gerencie seus dados e preferências.</p></div>
         <div class="settings-card">

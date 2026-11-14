@@ -1,4 +1,3 @@
-# Blueprint do Render: cria o banco PostgreSQL e a API Node de uma vez.
 # No Render: New + > Blueprint > selecione o repositório (com este arquivo em backend/).
 databases:
   - name: trifarmas-db

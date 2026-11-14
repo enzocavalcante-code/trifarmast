@@ -1,35 +1,19 @@
-/* =============================================================
-   Seleção dos remédios lidos numa foto (receita ou várias caixas)
-
-   Quando a leitura acha mais de um remédio, o app não escolhe por você:
-   abre esta tela com um bloco por remédio. Se a dosagem estava escrita, ela
-   já vem marcada; se não estava, as dosagens daquele remédio aparecem lado a
-   lado para você escolher.
-
-   Um pedido é sempre de UMA farmácia só. Por isso a tela compara o total da
-   receita inteira em cada farmácia e mostra os preços da farmácia escolhida —
-   não adianta ver o dipirona mais barato numa loja e a losartana em outra.
-   ============================================================= */
+/* Um pedido é sempre de UMA farmácia só: compara-se o total da receita em cada farmácia, não o menor preço de cada remédio. */
 
 const scanSelect = {
   open: false,
   source: 'receita',
   groups: [],        // { key, read, label, options:[med], chosen, doseRead, expanded }
   pharmacyId: null,  // farmácia do pedido (null = a mais barata para a seleção)
-  pinned: false,     // a pessoa escolheu a farmácia na mão
+  pinned: false,
 };
 
 const SCAN_OPTIONS_MAX = 6;
 
-/* As dosagens que entram na escolha: os remédios cujo nome tem a palavra lida
-   ("dipirona" → Dipirona Sódica 500mg, Dipirona 1g, Dipirona Gotas…). Sem
-   nenhum pelo nome, usa os do mesmo princípio ativo. */
 function scanFamilyOptions(group){
   const withPrice = allMeds().filter(med => pharmacyOffers(med).length);
   const byName = withPrice.filter(med => ocrTokens(med.name).includes(group.read));
   const list = byName.length ? byName : withPrice.filter(med => medicineFamily(med) === group.key);
-  // Com a dosagem lida, ela encabeça a lista. Sem dosagem, não há motivo para
-  // o app preferir uma: vale a ordem do mais procurado.
   const first = group.doseMatch && group.med ? group.med.id : null;
   return list
     .sort((a, b) => {
@@ -40,7 +24,6 @@ function scanFamilyOptions(group){
     .slice(0, SCAN_OPTIONS_MAX);
 }
 
-// Nome curto do bloco: "Dipirona", "Losartana".
 function scanGroupLabel(group){
   const word = group.read || group.key;
   return word.charAt(0).toUpperCase() + word.slice(1);
@@ -56,7 +39,6 @@ function openScanSelection(groups, source = 'receita'){
       read: group.read || group.key,
       label: scanGroupLabel(group),
       options,
-      // Com a dosagem lida, já vem marcada. Sem ela, a escolha é da pessoa.
       chosen: doseRead && options.some(o => o.id === group.med.id) ? group.med.id : null,
       doseRead,
       expanded: !doseRead,
@@ -64,7 +46,6 @@ function openScanSelection(groups, source = 'receita'){
   }).filter(group => group.options.length);
 
   if(scanSelect.groups.length < 2){
-    // Sobrou um só: a folha normal da câmera já resolve.
     const only = scanSelect.groups[0];
     if(only) showScannedMedicine(medById(only.chosen) || only.options[0], source);
     return;
@@ -97,18 +78,13 @@ function onScanSelectKeydown(event){
   if(event.key === 'Escape' && !document.querySelector('.modal-back')) closeScanSelection();
 }
 
-/* ---------------- escolhas ---------------- */
-
 function chooseScanOption(key, medId){
   const group = scanSelect.groups.find(g => g.key === key);
   if(!group) return;
-  group.chosen = group.chosen === medId ? null : medId;   // tocar de novo desmarca
+  group.chosen = group.chosen === medId ? null : medId;
   renderScanSelection();
 }
 
-/* ---------------- a farmácia do pedido ----------------
-   Como tudo sai de uma farmácia só, o que vale é o total da receita inteira
-   em cada uma — e não o menor preço de cada remédio separado. */
 function scanOrderPharmacies(){
   const meds = scanChosenMeds();
   return (state.catalog.pharmacies || []).map(pharm => {
@@ -123,7 +99,6 @@ function scanOrderPharmacies(){
   }).sort((a, b) => a.missing - b.missing || a.total - b.total);
 }
 
-// A farmácia em uso: a escolhida na mão ou a mais barata para o que está marcado.
 function activeScanPharmacy(){
   const options = scanOrderPharmacies();
   if(scanSelect.pinned && scanSelect.pharmacyId){
@@ -150,10 +125,6 @@ const scanChosenMeds = () => scanSelect.groups
   .map(group => medById(group.chosen))
   .filter(Boolean);
 
-/* ---------------- tela ---------------- */
-
-/* O preço mostrado é o da farmácia do pedido. O menor preço solto, numa loja
-   onde o resto da receita não está, não ajuda ninguém. */
 function scanOptionRow(group, med, order){
   const picked = group.chosen === med.id;
   const here = order ? med.prices[order.pharm.id] : null;
@@ -176,7 +147,6 @@ function scanOptionRow(group, med, order){
     </button>`;
 }
 
-// Faixa com o total da receita em cada farmácia: é por ela que a pessoa decide.
 // Fica sempre na tela (mesmo sem nada marcado) para a lista não pular de lugar.
 function scanPharmacyBar(order, hasChosen){
   const options = scanOrderPharmacies();
@@ -287,8 +257,6 @@ function renderScanSelection(){
   if(row) row.scrollLeft = keepLeft;
 }
 
-/* ---------------- levar para o carrinho ---------------- */
-
 function confirmScanSelection(){
   const meds = scanChosenMeds();
   const order = activeScanPharmacy();
@@ -299,7 +267,6 @@ function confirmScanSelection(){
     state.cart.items.push({ medId: med.id, qty: 1 });
     added++;
   }
-  // O pedido vai para a farmácia escolhida na tela (uma só, como manda o app).
   state.cart.pharmacyId = order.pharm.id;
   saveCart();
   updateCartUI(true);

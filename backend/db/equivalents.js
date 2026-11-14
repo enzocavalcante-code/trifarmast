@@ -1,5 +1,3 @@
-// Equivalência entre genérico e marca.
-//
 // Dois remédios são tratados como equivalentes quando têm o MESMO princípio
 // ativo, a MESMA dosagem e a mesma forma (comprimido, ml, g...). Só nesse caso
 // o app compara o preço por unidade e sugere o mais barato — sempre com o aviso
@@ -22,7 +20,6 @@ function strengthOf(name) {
   return found.join('+');
 }
 
-// Forma farmacêutica a partir da apresentação ("20 comprimidos", "Frasco 15 ml").
 const FORMS = [
   [/comprimido|capsula|cápsula|dragea|drágea|pastilha|envelope|sache|sachê/i, 'solido'],
   [/\bml\b/i, 'ml'],
@@ -36,7 +33,6 @@ function formOf(presentation) {
   return found ? found[1] : 'un';
 }
 
-// Nome da unidade no singular, para textos como "R$ 1,34 por comprimido".
 const UNIT_LABELS = {
   comprimido: /comprimido/i,
   cápsula: /capsula|cápsula/i,
@@ -54,7 +50,6 @@ function unitLabelOf(presentation) {
   return found ? found[0] : 'unidade';
 }
 
-// Quantidade da caixa: "20 comprimidos" = 20, "Frasco 15 ml" = 15.
 function unitCountOf(presentation) {
   const match = /(\d+)/.exec(String(presentation || ''));
   const value = match ? Number(match[1]) : 1;
@@ -83,7 +78,6 @@ function isGenericName({ name, ingredient }) {
     .some(word => active.includes(word));
 }
 
-// Dados calculados de um remédio do catálogo.
 function describe({ name, presentation, ingredient }) {
   return {
     strength: strengthOf(name),

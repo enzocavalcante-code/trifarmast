@@ -5,7 +5,6 @@ const { priceTable } = require('../delivery');
 
 const router = express.Router();
 
-// Agrupa as linhas (remédio x farmácia) no formato { id, name, ..., prices: { p1: 9.9, ... } }.
 async function listMedicines(whereSql, params, orderSql) {
   const { rows } = await query(
     `SELECT m.id, m.name, m.category, m.presentation, m.active_ingredient, m.requires_prescription,
@@ -35,9 +34,7 @@ async function listMedicines(whereSql, params, orderSql) {
   return [...byId.values()];
 }
 
-// Catálogo público: farmácias, remédios e recompensas.
 router.get('/catalog', asyncHandler(async (req, res) => {
-  // O catálogo muda raramente: o navegador pode reaproveitar por 5 minutos.
   res.set('Cache-Control', 'public, max-age=300');
   const [pharmacies, medicines, rewards] = await Promise.all([
     query('SELECT id, name, dist_km, domain FROM pharmacies ORDER BY dist_km'),
@@ -50,7 +47,6 @@ router.get('/catalog', asyncHandler(async (req, res) => {
     rewards: rewards.rows.map(r => ({
       id: r.id, name: r.name, desc: r.description, cost: r.cost, amount: Number(r.amount), minOrder: Number(r.min_order),
     })),
-    // Tabela da entrega por motoboy: o app faz a mesma conta do servidor.
     delivery: priceTable(),
   });
 }));

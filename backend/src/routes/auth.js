@@ -22,7 +22,6 @@ const LOGIN_BLOCKED = 'Muitas tentativas de senha. Aguarde alguns minutos e tent
 const loginPerNetwork = attempts({ name: 'login', max: 8, message: LOGIN_BLOCKED });
 const loginPerAccount = attempts({ name: 'login-conta', max: 30, message: LOGIN_BLOCKED });
 
-// Cadastros e logins do Google em massa vindos da mesma rede.
 const limitSignup = rateLimit({
   name: 'cadastro', windowMs: 60 * 60 * 1000, max: 30,
   message: 'Muitos cadastros vindos desta rede. Tente de novo mais tarde.',
@@ -34,12 +33,10 @@ const largeGooglePhoto = url => (/^https:\/\//.test(url || '') ? url.replace(/=s
 
 // Responde com a sessão. A mensagem de boas-vindas só é liberada uma vez por
 // conta: o mesmo comando que a libera já marca como vista no banco.
-// A resposta já traz pedidos, lembretes e pontos ("data"): assim o app entra na
-// conta com uma requisição só, em vez de quatro — muita diferença no 4G.
 async function sendSession(res, userRow, isNewUser) {
   const [welcome, data] = await Promise.all([
     query('UPDATE users SET welcome_seen = TRUE WHERE id = $1 AND welcome_seen = FALSE', [userRow.id]),
-    loadAccountData(userRow.id).catch(() => null),   // se falhar, o app busca depois
+    loadAccountData(userRow.id).catch(() => null),
   ]);
   res.json({
     token: signToken(userRow.id, userRow.token_version),
@@ -71,7 +68,6 @@ async function findUserByEmail(email) {
   return rows.length > 0;
 }
 
-// Resposta de "ainda não tem conta": o app usa os dados para abrir o cadastro já preenchido.
 function sendNeedsSignup(res, profile) {
   res.status(404).json({
     error: 'Você ainda não tem conta no Trifarmas com esta Conta Google.',
@@ -80,8 +76,6 @@ function sendNeedsSignup(res, profile) {
   });
 }
 
-// Login com Google: cria a conta na primeira vez; nas próximas, atualiza a foto
-// do Google — a menos que o usuário tenha escolhido uma foto manualmente.
 async function upsertGoogleUser({ name, email, picture }) {
   const updated = await query(
     `UPDATE users
@@ -150,7 +144,6 @@ router.post('/signup', limitSignup, asyncHandler(async (req, res) => {
   await sendSession(res, user, true);
 }));
 
-// Recebe o ID Token (JWT) do Google e valida a assinatura no servidor.
 router.post('/google', limitGoogle, asyncHandler(async (req, res) => {
   if (!config.googleClientId) throw new HttpError(503, 'Login com Google não configurado no servidor.');
   let payload;
@@ -170,7 +163,6 @@ router.post('/google', limitGoogle, asyncHandler(async (req, res) => {
     email: normalizeEmail(payload.email),
     picture: largeGooglePhoto(payload.picture),
   };
-  // Veio da tela inicial e não existe conta: manda criar a conta em vez de criar sozinho.
   if (requireExistingAccount(req.body.mode) && !(await findUserByEmail(profile.email))) {
     return sendNeedsSignup(res, profile);
   }
@@ -184,7 +176,6 @@ router.post('/google', limitGoogle, asyncHandler(async (req, res) => {
 router.post('/google-demo', limitGoogle, asyncHandler(async (req, res) => {
   if (!config.allowDemoGoogle) throw new HttpError(403, 'Conta demo desativada.');
   const profile = { name: 'Conta Demo Google', email: 'demo.google@trifarmas.app', picture: null };
-  // Mesma regra do login real: pela tela inicial, sem conta criada, vai para o cadastro.
   if (requireExistingAccount(req.body.mode) && !(await findUserByEmail(profile.email))) {
     return sendNeedsSignup(res, profile);
   }

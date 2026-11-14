@@ -17,7 +17,6 @@ function readCoords(q) {
   return { lat, lng };
 }
 
-// Farmácias reais ao redor de um ponto.
 router.get('/pharmacies', asyncHandler(async (req, res) => {
   const { lat, lng } = readCoords(req.query);
   try {
@@ -28,7 +27,6 @@ router.get('/pharmacies', asyncHandler(async (req, res) => {
   }
 }));
 
-// Endereço legível a partir de coordenadas.
 router.get('/reverse', asyncHandler(async (req, res) => {
   const { lat, lng } = readCoords(req.query);
   try {
@@ -38,7 +36,6 @@ router.get('/reverse', asyncHandler(async (req, res) => {
   }
 }));
 
-// Endereço ou CEP → coordenadas.
 router.get('/search', asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (q.length < 3) throw new HttpError(400, 'Digite um endereço ou CEP.');
@@ -47,7 +44,6 @@ router.get('/search', asyncHandler(async (req, res) => {
   res.json(place);
 }));
 
-// Localização aproximada pela conexão de internet (quando o GPS não está disponível).
 router.get('/approximate', asyncHandler(async (req, res) => {
   const ip = clientIp(req).replace(/^::ffff:/, '');
   let place = null;

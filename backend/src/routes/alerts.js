@@ -1,10 +1,3 @@
-// Alertas de preço: "avise quando baixar".
-//
-// O alerta guarda o menor preço do remédio no momento em que foi criado. Quando
-// o catálogo é atualizado (a cada inicialização da API), quem pediu o aviso
-// recebe uma notificação se o preço ficou abaixo do alvo — ou simplesmente
-// abaixo do preço de quando o alerta foi criado.
-
 const express = require('express');
 const { query } = require('../db');
 const { HttpError, asyncHandler } = require('../errors');
@@ -34,7 +27,6 @@ router.get('/', asyncHandler(async (req, res) => {
   res.json(rows.map(serializeAlert));
 }));
 
-// Cria (ou atualiza) o alerta de um remédio.
 router.post('/', asyncHandler(async (req, res) => {
   const medicineId = String(req.body.medicineId || '');
   const rawTarget = req.body.targetPrice;

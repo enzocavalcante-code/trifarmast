@@ -1,18 +1,7 @@
-/* =============================================================
-   Localização e mapa
-   - Localização atual do aparelho (GPS / Wi-Fi), com nova tentativa
-   - Busca por endereço ou CEP
-   - Farmácias reais ao redor no mapa (Leaflet + OpenStreetMap)
-   - Distância real até a loja mais próxima de cada rede parceira
-   As buscas de farmácias e endereços passam pela API do Trifarmas (Render),
-   que tenta vários servidores de mapas e guarda os resultados em cache.
-   ============================================================= */
-
 const LOCATION_STORAGE_KEY = 'trifarmas-location';
-const LOCATION_MAX_AGE_MS = 6 * 60 * 60 * 1000; // reaproveita a última localização por 6h
-const DEFAULT_CENTER = { lat: -23.5505, lng: -46.6333 }; // São Paulo (usado só no mapa, sem localização)
+const LOCATION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_CENTER = { lat: -23.5505, lng: -46.6333 };
 
-// Redes conhecidas: palavras do nome/marca no OpenStreetMap → site (para o logo).
 // "partner" liga a loja à farmácia parceira do catálogo, para calcular a distância real.
 const PHARMACY_BRANDS = [
   { keys: ['droga raia', 'drogaraia', 'raia'],               domain: 'drogaraia.com.br',          partner: 'p1' },
@@ -55,16 +44,16 @@ function domainFromWebsite(url){
 }
 
 const loc = {
-  coords: null,          // { lat, lng }
-  accuracy: null,        // metros (GPS)
-  source: null,          // 'gps' | 'address'
+  coords: null,
+  accuracy: null,
+  source: null,
   address: '',
   radiusKm: 4,
-  pharmacies: [],        // farmácias reais ao redor, ordenadas por distância
+  pharmacies: [],
   pharmaciesStatus: 'idle', // idle | loading | done | error
   pharmaciesError: '',
   gpsError: '',
-  manualAddress: false,  // a pessoa digitou um endereço nesta visita
+  manualAddress: false,
   chainMatches: {},      // { p1: { km, street, lat, lng }, ... }
   requestId: 0,
   locating: false,
@@ -73,8 +62,6 @@ const loc = {
 let leafletMap = null;
 let mapLayers = null;
 const pharmacyMarkers = new Map();
-
-/* ---------------- utilidades ---------------- */
 
 function haversineKm(a, b){
   const R = 6371;
@@ -96,7 +83,6 @@ const radiusLabel = () => `${String(loc.radiusKm).replace('.', ',')} km`;
 const directionsUrl = (lat, lng) => `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
 const googleMapsSearchUrl = c => `https://www.google.com/maps/search/farm%C3%A1cia/@${c.lat},${c.lng},15z`;
 
-/* Distância exibida nos cards de busca, carrinho e pagamento. */
 function pharmacyDistance(pharm){
   if(!loc.coords) return { km: pharm.dist, label: 'Ative a localização para ver a distância' };
   const match = loc.chainMatches[pharm.id];
@@ -109,20 +95,16 @@ function pharmacyDistance(pharm){
   return { km: Infinity, label: `Nenhuma loja num raio de ${radiusLabel()}` };
 }
 
-/* ---------------- localização do aparelho ---------------- */
-
-// Metas de precisão (em metros) e tempos de espera do GPS.
 const GPS = {
-  exactM: 30,            // "na porta de casa": para de procurar ao chegar nisso
-  goodM: 100,            // já serve para a entrega
-  quickTimeoutMs: 9000,  // primeira tentativa, rápida, sem exigir precisão
-  quickMaxAgeMs: 120000, // aceita uma posição de até 2 min que o aparelho já tenha
+  exactM: 30,
+  goodM: 100,
+  quickTimeoutMs: 9000,
+  quickMaxAgeMs: 120000,
   firstTimeoutMs: 30000, // o GPS do celular pode levar ~20 s para a primeira leitura exata
   networkTimeoutMs: 15000,
-  refineMs: 45000,       // continua melhorando em segundo plano depois da 1ª leitura
+  refineMs: 45000,
 };
 
-// Uma leitura só, sem ficar ouvindo o GPS.
 function getPositionOnce({ highAccuracy = false, timeoutMs = 9000, maximumAge = 0 } = {}){
   return new Promise((resolve, reject)=>{
     navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -136,9 +118,6 @@ function stopGpsWatch(){
   if(gpsWatchId !== null){ navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
 }
 
-// Acompanha o GPS e entrega CADA leitura melhor que a anterior (onReading), em vez de
-// esperar a melhor de todas: o mapa já mostra a posição e vai se ajustando sozinho.
-// Só termina quando chega na precisão pedida, quando o tempo acaba ou quando dá erro.
 function trackPosition({ highAccuracy, timeoutMs, stopAtM, onReading }){
   return new Promise((resolve, reject)=>{
     let best = null, lastError = null, done = false, graceTimer = null;
@@ -154,14 +133,14 @@ function trackPosition({ highAccuracy, timeoutMs, stopAtM, onReading }){
     gpsWatchId = navigator.geolocation.watchPosition(pos=>{
       clearTimeout(graceTimer);
       graceTimer = null;
-      if(best && pos.coords.accuracy >= best.coords.accuracy) return; // ignora leituras piores
+      if(best && pos.coords.accuracy >= best.coords.accuracy) return;
       best = pos;
       onReading(pos);
       if(pos.coords.accuracy <= stopAtM) finish();
     }, err=>{
       lastError = err;
-      if(best) return finish();       // já temos uma posição: fica com ela
-      if(err.code === 1) return finish(err); // permissão negada: não adianta insistir
+      if(best) return finish();
+      if(err.code === 1) return finish(err);
       // "Posição indisponível" pode ser o GPS esquentando: espera um pouco antes de desistir
       // (sem isso, computador sem GPS ficaria 30 s travado antes de tentar pela rede).
       if(!graceTimer) graceTimer = setTimeout(()=> finish(), 8000);
@@ -169,8 +148,6 @@ function trackPosition({ highAccuracy, timeoutMs, stopAtM, onReading }){
   });
 }
 
-// Depois da primeira leitura, continua ouvindo o GPS por alguns segundos:
-// é assim que a precisão cai de "~800 m" para "~10 m" sem a pessoa fazer nada.
 let refineWatchId = null;
 function refineGpsInBackground(){
   stopRefining();
@@ -178,7 +155,6 @@ function refineGpsInBackground(){
   const stopAt = Date.now() + GPS.refineMs;
   refineWatchId = navigator.geolocation.watchPosition(pos=>{
     if(Date.now() > stopAt || loc.source !== 'gps') return stopRefining();
-    // Vale qualquer leitura 15% melhor que a atual (antes exigia metade: quase nunca acontecia).
     if(pos.coords.accuracy < loc.accuracy * 0.85){
       setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, source: 'gps' });
       if(pos.coords.accuracy <= GPS.exactM) stopRefining();
@@ -193,11 +169,10 @@ function stopRefining(){
 async function permissionState(){
   try{
     if(navigator.permissions) return (await navigator.permissions.query({ name: 'geolocation' })).state;
-  }catch{ /* navegador sem Permissions API */ }
+  }catch{}
   return 'prompt';
 }
 
-// Motivo de o GPS não ter funcionado, em uma linha.
 function geolocationErrorMessage(err){
   if(!window.isSecureContext) return 'Sem <b>https</b> o navegador não libera a localização.';
   if(err && err.code === 1) return 'Localização bloqueada. Libere no cadeado ao lado do endereço.';
@@ -205,7 +180,6 @@ function geolocationErrorMessage(err){
   return 'Não consegui sua localização. Veja se o GPS do aparelho está ligado.';
 }
 
-// Aviso de GPS indisponível: a mensagem, a saída e o botão de tentar de novo.
 function showGpsProblem(){
   setLocStatus(`<span>${loc.gpsError}</span>
     <span class="loc-tip">Ou digite seu <b>endereço ou CEP</b> acima.</span>
@@ -227,7 +201,6 @@ async function requestMapLocation(userInitiated = false){
     if(!loc.coords) await useApproximateLocation();
     return;
   }
-  // Automático (sem clique): se o navegador já informa bloqueio, nem tenta o GPS.
   // Com clique no botão, tenta sempre — alguns navegadores informam "bloqueado" sem estar.
   if(!userInitiated && await permissionState() === 'denied'){
     loc.gpsError = geolocationErrorMessage({ code: 1 });
@@ -240,7 +213,6 @@ async function requestMapLocation(userInitiated = false){
   setLocStatus('<span class="spinner"></span> Procurando sua localização… toque em <b>Permitir</b> se o navegador perguntar.');
 
   let got = false;
-  // Cada leitura melhor já entra no mapa, com a precisão à vista.
   const apply = async pos => {
     got = true;
     loc.gpsError = '';
@@ -258,16 +230,13 @@ async function requestMapLocation(userInitiated = false){
   };
 
   let lastError = null;
-  /* 1) Primeiro uma leitura rápida, sem exigir precisão e aceitando uma posição
-     recente que o aparelho já tenha (Wi-Fi/antena). É o que destrava o mapa em
-     poucos segundos — o GPS exato costuma demorar e, em alguns celulares,
-     responder "posição indisponível" antes de esquentar. */
+  /* Primeiro uma leitura rápida, sem exigir precisão: o GPS exato costuma demorar e, em alguns celulares,
+     responde "posição indisponível" antes de esquentar. */
   try{
     const quick = await getPositionOnce({ highAccuracy: false, timeoutMs: GPS.quickTimeoutMs, maximumAge: GPS.quickMaxAgeMs });
     await apply(quick);
   }catch(err){ lastError = err; }
 
-  // 2) Agora sim o GPS, para afinar a posição (ou achá-la, se a rápida falhou).
   if(!(lastError && lastError.code === 1)){
     try{
       await trackPosition({ highAccuracy: true, timeoutMs: GPS.firstTimeoutMs, stopAtM: GPS.exactM, onReading: apply });
@@ -290,7 +259,7 @@ async function requestMapLocation(userInitiated = false){
   if(got){
     lastLocationFix = Date.now();
     updateLocationStatus();
-    refineGpsInBackground();   // continua afinando a precisão sozinho
+    refineGpsInBackground();
     if(userInitiated && state.activeTab !== 'map') showToast('Localização atualizada! Distâncias recalculadas.');
     return;
   }
@@ -301,21 +270,17 @@ async function requestMapLocation(userInitiated = false){
   else showGpsProblem(lastError);
 }
 
-// Sem GPS: estima a localização pela conexão de internet (nível de bairro/cidade),
-// para o mapa já mostrar farmácias. A pessoa pode refinar digitando o CEP.
 async function useApproximateLocation(err = null){
   setLocStatus('<span class="spinner"></span> Buscando a localização aproximada…');
   try{
     const place = await api.approximateLocation();
     await setLocation({ lat: place.lat, lng: place.lng, source: 'ip', address: place.label });
   }catch{
-    // Nem GPS nem estimativa pela internet: mostra o motivo e deixa o endereço como saída.
     if(loc.gpsError) showGpsProblem(err);
     else setLocStatus('Não consegui sua localização. Digite o <b>endereço ou CEP</b> acima.', 'warn');
     if(!loc.coords) showMapAt(DEFAULT_CENTER, 12);
     return;
   }
-  // Deixa claro que é a aproximada e por que o GPS não entrou.
   if(loc.gpsError) updateLocationStatus(err);
 }
 
@@ -324,8 +289,6 @@ function setGpsButtonBusy(busy){
   if(btn) btn.disabled = busy;
 }
 
-// Ao entrar no app: mostra a última localização salva enquanto busca a atual.
-// Se a localização já está autorizada, o GPS é consultado sempre, automaticamente.
 let permissionWatcherSet = false;
 async function initLocationSilently(){
   const saved = storage.get(LOCATION_STORAGE_KEY);
@@ -339,8 +302,6 @@ async function initLocationSilently(){
   updateLocationHint();
 }
 
-/* Voltando ao app depois de um tempo (ou de sair para liberar a localização
-   nas configurações), procura a posição de novo em vez de ficar na antiga. */
 let lastLocationFix = 0;
 document.addEventListener('visibilitychange', ()=>{
   if(document.hidden || !state.user) return;
@@ -350,7 +311,6 @@ document.addEventListener('visibilitychange', ()=>{
   requestMapLocation(false);
 });
 
-// Se a pessoa liberar a localização nas configurações do navegador, atualiza sozinho.
 async function watchPermissionChanges(){
   if(permissionWatcherSet || !navigator.permissions) return;
   try{
@@ -359,11 +319,11 @@ async function watchPermissionChanges(){
     status.onchange = ()=>{
       if(status.state === 'granted' && state.user && !loc.manualAddress) requestMapLocation(false);
     };
-  }catch{ /* navegador sem Permissions API */ }
+  }catch{}
 }
 
-let lastNearbyCenter = null;   // ponto em que as farmácias ao redor foram buscadas
-let lastAddressPoint = null;   // ponto do último endereço lido pelo mapa
+let lastNearbyCenter = null;
+let lastAddressPoint = null;
 
 async function setLocation({ lat, lng, accuracy = null, source, address = '' }, { save = true } = {}){
   const requestId = ++loc.requestId;
@@ -387,7 +347,7 @@ async function setLocation({ lat, lng, accuracy = null, source, address = '' }, 
     loc.chainMatches = {};
     loc.pharmaciesStatus = 'loading';
   } else {
-    rescoreNearbyPharmacies();   // mesma lista, distâncias recalculadas
+    rescoreNearbyPharmacies();
   }
 
   updateLocationStatus();
@@ -396,7 +356,6 @@ async function setLocation({ lat, lng, accuracy = null, source, address = '' }, 
   renderMapMarkers();
   refreshDistanceViews();
 
-  // Endereço legível: só busca de novo se andou mais de 40 m (ou se ainda não tem).
   const needsAddress = !address && (!loc.address || !lastAddressPoint || haversineKm(lastAddressPoint, point) > 0.04);
   if(needsAddress){
     lastAddressPoint = point;
@@ -415,7 +374,6 @@ async function setLocation({ lat, lng, accuracy = null, source, address = '' }, 
   }
 }
 
-// Zoom conforme a precisão: leitura exata mostra a rua; leitura grosseira, o bairro.
 function zoomForAccuracy(accuracy){
   if(!accuracy) return 16;
   if(accuracy <= 30) return 18;
@@ -424,7 +382,6 @@ function zoomForAccuracy(accuracy){
   return 14;
 }
 
-// Recalcula as distâncias da lista já carregada quando a posição muda pouco.
 function rescoreNearbyPharmacies(){
   if(!loc.coords || !loc.pharmacies.length) return;
   loc.pharmacies = loc.pharmacies
@@ -464,7 +421,6 @@ function updateLocationStatus(err = null){
   const precision = loc.accuracy
     ? ` <span class="loc-precision ${exact ? 'exact' : ''}">precisão de ~${formatAccuracy(loc.accuracy)}</span>`
     : '';
-  // Precisão ruim: oferece melhorar sem ter que procurar o botão lá em cima.
   const improve = loc.accuracy && loc.accuracy > GPS.goodM
     ? `<button class="btn-outline-sm" onclick="requestMapLocation(true)">Melhorar precisão</button>`
     : '';
@@ -486,14 +442,11 @@ function updateLocationHint(){
   hint.classList.remove('hidden');
 }
 
-// Atualiza telas que mostram distância (busca, carrinho).
 function refreshDistanceViews(){
   if(state.activeTab === 'home') renderResults();
   if(state.activeTab === 'map') renderPharmacyList();
   if(typeof refreshCheckoutIfOpen === 'function') refreshCheckoutIfOpen();
 }
-
-/* ---------------- endereço / CEP ---------------- */
 
 async function searchAddress(){
   const raw = $('loc-input').value.trim();
@@ -509,8 +462,6 @@ async function searchAddress(){
     setLocStatus(escapeHtml(e.message), 'warn');
   }
 }
-
-/* ---------------- farmácias reais ao redor ---------------- */
 
 async function loadNearbyPharmacies(requestId, attempt = 1){
   const center = loc.coords;
@@ -555,8 +506,6 @@ function retryPharmacies(){
   loadNearbyPharmacies(loc.requestId);
 }
 
-/* ---------------- mapa ---------------- */
-
 let mapInitialized = false;
 
 function initMap(){
@@ -570,10 +519,8 @@ function initMap(){
         showMapAt(loc.coords, loc.source === 'ip' ? 13 : 15);
         renderMapMarkers();
       }
-      /* Sempre procura a posição atual ao abrir o mapa. Antes, uma leitura
-         guardada de até 6 h atrás fazia o app nem tentar — e o mapa ficava
-         mostrando onde a pessoa estava ontem. Só não insiste se ela digitou
-         um endereço nesta visita. */
+      /* Sempre procura a posição atual (a guardada pode ser de horas atrás).
+         Só não insiste se a pessoa digitou um endereço nesta visita. */
       if(!loc.manualAddress && !loc.locating) requestMapLocation(false);
     }
     renderPharmacyList();
@@ -583,8 +530,6 @@ function initMap(){
 function ensureMap(){
   if(leafletMap || !window.L || $('tab-map').classList.contains('hidden')) return;
   leafletMap = L.map('leaflet-map', { zoomControl: true, scrollWheelZoom: false, tap: true });
-  // Imagens do mapa: OpenStreetMap (gratuito, sem chave). Se várias imagens falharem,
-  // troca para o servidor do OpenStreetMap França (estilo Humanitarian).
   const osmAttribution = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
   let tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: osmAttribution }).addTo(leafletMap);
   let tileErrors = 0;
@@ -597,7 +542,6 @@ function ensureMap(){
   leafletMap.setView([DEFAULT_CENTER.lat, DEFAULT_CENTER.lng], 12);
 }
 
-// Sem a biblioteca do mapa (bloqueada ou offline), usa o Google Maps embutido.
 function showMapAt(center, zoom){
   ensureMap();
   if(leafletMap){
@@ -637,11 +581,9 @@ function renderMapMarkers(){
     .bindPopup('<div class="map-popup"><b>Você está aqui</b></div>').addTo(mapLayers);
 
   const bounds = [[loc.coords.lat, loc.coords.lng]];
-  // Farmácias próximas + loja mais próxima de cada rede parceira (mesmo se estiver mais longe).
   const onMap = new Map(loc.pharmacies.map(p => [p.id, p]));
   Object.values(loc.chainMatches).forEach(p => onMap.set(p.id, p));
   [...onMap.values()].sort((a, b) => a.km - b.km).forEach((p, i)=>{
-    // Todas as farmácias do app são parceiras: um único pino verde.
     const marker = L.marker([p.lat, p.lng], { icon: pinIcon('pharmacy') })
       .bindPopup(pharmacyPopup(p)).addTo(mapLayers);
     pharmacyMarkers.set(p.id, marker);

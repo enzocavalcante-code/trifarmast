@@ -23,12 +23,11 @@ app.use(cors({
 // digita a senha: com ?warm=1 abre uma conexão com o banco antes do login.
 app.get('/health', async (req, res) => {
   if (req.query.warm) {
-    try { await require('./db').query('SELECT 1'); } catch { /* responde ok mesmo assim */ }
+    try { await require('./db').query('SELECT 1'); } catch {}
   }
   res.json({ ok: true });
 });
 
-// Teto geral por IP: segura enxurradas de pedidos sem atrapalhar o uso normal.
 app.use('/api', rateLimit({ name: 'geral', windowMs: 5 * 60 * 1000, max: 1500 }));
 
 // Corpo dos pedidos: 100 KB bastam para quase tudo. Só a foto de perfil e a
@@ -42,8 +41,6 @@ const corpoPequeno = corpo('100kb');
 const temArquivo = req => req.path === '/api/me' || /^\/api\/orders\/\d+\/prescription$/.test(req.path);
 app.use((req, res, next) => (temArquivo(req) ? next() : corpoPequeno(req, res, next)));
 
-// Enquanto o banco não termina de preparar, a API responde "tente de novo"
-// em vez de dar erro feio. O /health acima continua respondendo desde o início.
 let bancoPronto = false;
 app.use('/api', (req, res, next) => {
   if (bancoPronto) return next();
@@ -58,7 +55,7 @@ app.use('/api/reminders', requireAuth, require('./routes/reminders'));
 app.use('/api/stocks', requireAuth, require('./routes/stocks'));
 app.use('/api/points', requireAuth, require('./routes/points'));
 app.use('/api/places', requireAuth, require('./routes/places'));
-app.use('/api/pickups', require('./routes/pickups'));   // balcão da farmácia: autentica pelo PIN, não por conta
+app.use('/api/pickups', require('./routes/pickups'));
 
 app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 

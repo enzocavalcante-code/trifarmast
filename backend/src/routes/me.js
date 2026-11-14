@@ -22,10 +22,6 @@ router.get('/', asyncHandler(async (req, res) => {
   res.json(serialize.user(await loadUser(req.userId)));
 }));
 
-// Atualiza nome, e-mail, foto e (opcionalmente) senha.
-//  - avatar: foto escolhida manualmente (passa a ter prioridade sobre a do Google)
-//  - resetAvatar: volta a usar a foto da Conta Google
-//  - trocar o e-mail ou a senha exige a senha atual
 router.patch('/', asyncHandler(async (req, res) => {
   const user = await loadUser(req.userId);
   const name = String(req.body.name ?? '').trim() || user.name;

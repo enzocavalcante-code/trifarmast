@@ -1,6 +1,3 @@
-/* Cliente da API do Trifarmas (backend no Render).
-   Toda comunicação com o banco de dados passa por aqui. */
-
 const api = (() => {
   const BASE = window.TRIFARMAS_CONFIG.API_URL.replace(/\/$/, '') + '/api';
   let token = null;
@@ -21,10 +18,8 @@ const api = (() => {
     }
     if (res.status === 204) return null;
     const data = await res.json().catch(() => ({}));
-    // Sessão recusada no meio do uso (venceu, ou a senha foi trocada em outro aparelho).
     if (res.status === 401 && token && api.onSessionExpired) api.onSessionExpired();
     if (!res.ok) {
-      // Alguns erros trazem informação extra (ex.: conta Google sem cadastro).
       const error = new Error(data.error || 'Algo deu errado. Tente novamente.');
       error.code = data.code || null;
       error.status = res.status;
@@ -55,49 +50,39 @@ const api = (() => {
     setToken: t => { token = t; },
     warmUp,
 
-    // Autenticação
     login: (email, password) => post('/auth/login', { email, password }),
     signup: data => post('/auth/signup', data),
-    // mode: 'login' (tela inicial, só entra em conta existente) ou 'signup' (cria a conta)
     googleLogin: (credential, mode = 'login') => post('/auth/google', { credential, mode }),
     googleDemo: mode => post('/auth/google-demo', { mode }),
 
-    // Perfil
     me: () => get('/me'),
     updateMe: data => patch('/me', data),
 
-    // Catálogo
     catalog: () => get('/catalog'),
 
-    // Pedidos
     orders: () => get('/orders'),
     createOrder: data => post('/orders', data),
     confirmPickup: id => post(`/orders/${id}/pickup`),
     sendPrescription: (id, data) => post(`/orders/${id}/prescription`, data),
     getPrescription: id => get(`/orders/${id}/prescription`),
 
-    // Lembretes
     reminders: () => get('/reminders'),
     addReminder: data => post('/reminders', data),
     removeReminder: id => del(`/reminders/${id}`),
     // consume=false: lembrete vencido há horas, não desconta do estoque
     markRemindersFired: (ids, consume = true) => post('/reminders/fired', { ids, consume }),
 
-    // Estoque em casa (quantas unidades a pessoa tem de cada remédio)
     stocks: () => get('/stocks'),
     saveStock: data => request('PUT', '/stocks', data),
 
-    // Localização (farmácias próximas e endereços)
     nearbyPharmacies: (lat, lng) => get(`/places/pharmacies?lat=${lat}&lng=${lng}`),
     reverseGeocode: (lat, lng) => get(`/places/reverse?lat=${lat}&lng=${lng}`),
     geocode: q => get(`/places/search?q=${encodeURIComponent(q)}`),
     approximateLocation: () => get('/places/approximate'),
 
-    // Balcão da farmácia (pharmacy.html): autentica pela senha do painel, sem conta
     pickupLookup: (code, pin) => post('/pickups/lookup', { code, pin }),
     pickupConfirm: (code, pin) => post('/pickups/confirm', { code, pin }),
 
-    // Pontos
     points: () => get('/points'),
     redeemReward: id => post(`/points/rewards/${id}/redeem`),
   };

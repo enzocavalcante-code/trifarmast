@@ -14,7 +14,6 @@ const checkPassword = (plain, hash) => (hash ? bcrypt.compare(plain, hash) : Pro
 const normalizeEmail = email => String(email || '').trim().toLowerCase();
 const looksLikeEmail = email => email.length <= MAX_EMAIL && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-// Regras de uma senha nova (cadastro e troca de senha).
 function assertNewPassword(password) {
   if (password.length < MIN_PASSWORD) throw new HttpError(400, `A senha precisa ter pelo menos ${MIN_PASSWORD} caracteres.`);
   if (Buffer.byteLength(password) > MAX_PASSWORD_BYTES) throw new HttpError(400, 'A senha é longa demais. Use até 72 caracteres.');
@@ -28,7 +27,6 @@ function assertName(name) {
 const signToken = (userId, version = 0) =>
   jwt.sign({ sub: userId, v: version }, config.jwtSecret, { algorithm: 'HS256', expiresIn: '7d' });
 
-// Middleware: exige "Authorization: Bearer <token>" e coloca req.userId.
 async function requireAuth(req, res, next) {
   const expired = () => res.status(401).json({ error: 'Sessão expirada. Entre novamente.' });
   const header = req.get('authorization') || '';

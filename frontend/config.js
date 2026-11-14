@@ -1,7 +1,6 @@
 // Configuração do front-end (Vercel). Edite apenas este arquivo ao publicar.
 window.TRIFARMAS_CONFIG = {
   // URL pública da API no Render (sem barra no final).
-  // Em desenvolvimento local, aponta para o backend rodando na sua máquina.
   API_URL: ['localhost', '127.0.0.1'].includes(location.hostname)
     ? 'http://localhost:3000'
     : 'https://trifarmast.onrender.com',

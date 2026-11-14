@@ -1,9 +1,5 @@
-// Grava o catálogo no banco a cada inicialização (insere o que falta e
-// atualiza o que mudou). Rodar várias vezes é seguro.
-
 const { PHARMACIES, MEDICINES, REWARDS, priceFor } = require('./catalog');
 
-// Conta de demonstração que já vem preenchida na tela de login.
 const DEMO_USER = { name: 'Trifarmas', email: 'trifarmas@gmail.com', password: '123456', points: 340 };
 
 async function seed(client, hashPassword) {

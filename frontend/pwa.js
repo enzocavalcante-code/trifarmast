@@ -1,9 +1,3 @@
-/* =============================================================
-   PWA: instalar na tela de início e funcionar com internet ruim.
-   O service worker (sw.js) guarda a casca do app (HTML, CSS, JS e ícones)
-   para abrir rápido mesmo offline. Os dados continuam vindo da API.
-   ============================================================= */
-
 let installPrompt = null;
 
 function registerServiceWorker(){
@@ -11,12 +5,10 @@ function registerServiceWorker(){
   // file:// não aceita service worker (abrir o index.html direto no navegador).
   if(location.protocol === 'file:') return;
   window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('sw.js').catch(()=>{ /* sem cache offline */ });
+    navigator.serviceWorker.register('sw.js').catch(()=>{ });
   });
 }
 
-// O navegador avisa quando o app pode ser instalado; guardamos o convite para
-// mostrar o botão "Instalar" no Perfil.
 window.addEventListener('beforeinstallprompt', event => {
   event.preventDefault();
   installPrompt = event;

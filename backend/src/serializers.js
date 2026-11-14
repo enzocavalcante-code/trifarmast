@@ -1,5 +1,3 @@
-// Converte linhas do banco no formato que o front-end espera.
-
 const delivery = require('./delivery');
 
 const STATUS = {
@@ -14,7 +12,6 @@ const STATUS = {
 };
 
 const isDelivery = row => row.fulfillment === 'delivery';
-// Último passo antes de o usuário confirmar (retirada no balcão ou recebimento em casa).
 const handoverStatus = row => (isDelivery(row) ? STATUS.ARRIVED : STATUS.READY);
 const finalStatus = row => (isDelivery(row) ? STATUS.DELIVERED : STATUS.DONE);
 
@@ -62,7 +59,6 @@ function orderStatus(row, now = Date.now()) {
   return current;
 }
 
-// Dados da entrega enviados ao app: taxa, endereço, motoboy e horários da simulação.
 function orderDelivery(row) {
   if (!isDelivery(row)) return null;
   const timeline = orderTimeline(row);

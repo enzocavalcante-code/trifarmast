@@ -1,13 +1,11 @@
-// Estoque de remédio em casa: quantas unidades a pessoa tem e quanto dura.
-// A baixa acontece quando o lembrete toca (rota de lembretes "fired").
+// A baixa no estoque acontece na rota de lembretes "fired".
 
 const { query } = require('./db');
 
 const UNIT_LABELS = ['comprimidos', 'cápsulas', 'doses', 'ml', 'gotas'];
 const MAX_UNITS = 9999;
-const MAX_STOCKS = 300;   // remédios diferentes por conta
+const MAX_STOCKS = 300;
 
-// Chave de comparação: sem acento, sem espaços repetidos, em minúsculas.
 const medKey = name => String(name || '')
   .normalize('NFD').replace(/[̀-ͯ]/g, '')
   .trim().replace(/\s+/g, ' ').toLowerCase();
@@ -42,7 +40,6 @@ async function listStocks(userId) {
   return rows.map(serializeStock);
 }
 
-// Cria ou atualiza o estoque de um remédio.
 async function saveStock(userId, { med, units, perDose, unitLabel: label }) {
   const name = String(med || '').trim().slice(0, 120);
   const key = medKey(name);
@@ -64,7 +61,6 @@ async function saveStock(userId, { med, units, perDose, unitLabel: label }) {
   return serializeStock(rows[0]);
 }
 
-// Dá baixa no estoque quando o lembrete toca (nunca fica negativo).
 async function consumeDoses(userId, medicines) {
   const keys = [...new Set(medicines.map(medKey).filter(Boolean))];
   if (!keys.length) return [];

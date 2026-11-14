@@ -30,7 +30,6 @@ async function loadOrder(db, userId, orderId) {
   return order;
 }
 
-// Junta itens repetidos e valida quantidades.
 function normalizeItems(rawItems) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) throw new HttpError(400, 'Seu carrinho está vazio.');
   const quantities = new Map();
@@ -44,7 +43,6 @@ function normalizeItems(rawItems) {
   return quantities;
 }
 
-// IDs de pedido precisam ser numéricos (evita erro do banco com valores inválidos).
 router.param('id', (req, res, next, id) => {
   if (!/^\d{1,15}$/.test(id)) return next(new HttpError(404, 'Pedido não encontrado.'));
   next();
@@ -63,7 +61,6 @@ router.post('/', limitOrders, asyncHandler(async (req, res) => {
   if (!PAYMENT_METHODS.includes(paymentMethod)) throw new HttpError(400, 'Escolha uma forma de pagamento.');
   const quantities = normalizeItems(req.body.items);
 
-  // Entrega por motoboy ou retirada no balcão. A taxa é calculada no servidor.
   const fulfillment = FULFILLMENTS.includes(req.body.fulfillment) ? req.body.fulfillment : 'pickup';
   const isDelivery = fulfillment === 'delivery';
   if (paymentMethod === 'Dinheiro na entrega' && !isDelivery) throw new HttpError(400, 'Escolha uma forma de pagamento.');
@@ -144,8 +141,6 @@ router.post('/', limitOrders, asyncHandler(async (req, res) => {
   res.status(201).json({ order });
 }));
 
-// Receita médica: o usuário escolhe anexar o arquivo (PDF ou foto) ou mostrar na retirada.
-// Enquanto não escolher, o pedido fica em "Aguardando receita".
 router.post('/:id/prescription', limitUploads, asyncHandler(async (req, res) => {
   const { choice } = req.body;
   if (!['upload', 'in_person'].includes(choice)) throw new HttpError(400, 'Escolha como vai apresentar a receita.');
@@ -197,7 +192,6 @@ router.get('/:id/prescription', asyncHandler(async (req, res) => {
   res.json({ fileName: file.file_name, mime: file.mime, data: file.data });
 }));
 
-// Confirma a retirada no balcão (ou o recebimento em casa) e credita os pontos.
 router.post('/:id/pickup', asyncHandler(async (req, res) => {
   const result = await transaction(async client => {
     const { rows: [row] } = await client.query(

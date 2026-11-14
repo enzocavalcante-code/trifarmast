@@ -1,5 +1,3 @@
-// Validação de imagens/arquivos enviados como data URL.
-
 const DATA_URL = /^data:([\w.+-]+\/[\w.+-]+);base64,([A-Za-z0-9+/]+={0,2})$/;
 
 // Os primeiros bytes dizem o tipo real do arquivo, seja qual for o tipo declarado.
@@ -13,8 +11,6 @@ const SIGNATURES = {
   'application/pdf': head => text(head).includes('%PDF-'),
 };
 
-// Devolve o tipo e o tamanho, ou null se não for um arquivo dos tipos aceitos
-// (com o conteúdo batendo com o tipo).
 function parseDataUrl(value, allowedTypes) {
   const match = DATA_URL.exec(typeof value === 'string' ? value : '');
   if (!match) return null;
@@ -27,8 +23,7 @@ function parseDataUrl(value, allowedTypes) {
 const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_AVATAR_BYTES = 512 * 1024;
 
-// Foto de perfil escolhida pela pessoa: só imagem de verdade, enviada pelo app.
-// (Links não são aceitos: a foto do Google e a de iniciais são gravadas pelo servidor.)
+// Links não são aceitos: a foto do Google e a de iniciais são gravadas pelo servidor.
 function isValidAvatar(value) {
   const parsed = parseDataUrl(value, AVATAR_TYPES);
   return !!parsed && parsed.bytes <= MAX_AVATAR_BYTES;

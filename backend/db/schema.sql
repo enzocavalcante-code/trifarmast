@@ -1,11 +1,7 @@
--- =============================================================
--- Trifarmas — esquema do banco (PostgreSQL)
 -- Executado automaticamente ao iniciar o servidor.
 -- Todas as instruções são idempotentes: criam o que falta e
 -- atualizam bancos já existentes sem apagar dados.
--- =============================================================
 
--- ---------- Catálogo ----------
 CREATE TABLE IF NOT EXISTS pharmacies (
   id        TEXT PRIMARY KEY,
   name      TEXT NOT NULL,
@@ -32,30 +28,28 @@ CREATE TABLE IF NOT EXISTS medicine_prices (
   PRIMARY KEY (medicine_id, pharmacy_id)
 );
 
--- Recompensas: trocadas por pontos, viram cupons de desconto.
 CREATE TABLE IF NOT EXISTS rewards (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,
   description  TEXT NOT NULL,
   cost         INTEGER NOT NULL
 );
-ALTER TABLE rewards ADD COLUMN IF NOT EXISTS amount    NUMERIC(10,2) NOT NULL DEFAULT 0;  -- valor do desconto em R$
-ALTER TABLE rewards ADD COLUMN IF NOT EXISTS min_order NUMERIC(10,2) NOT NULL DEFAULT 0;  -- compra mínima para usar
+ALTER TABLE rewards ADD COLUMN IF NOT EXISTS amount    NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE rewards ADD COLUMN IF NOT EXISTS min_order NUMERIC(10,2) NOT NULL DEFAULT 0;
 
--- ---------- Usuários ----------
 CREATE TABLE IF NOT EXISTS users (
   id              SERIAL PRIMARY KEY,
   name            TEXT NOT NULL,
   email           TEXT NOT NULL UNIQUE,
   password_hash   TEXT,                    -- NULL para contas criadas só pelo Google
   google_account  BOOLEAN NOT NULL DEFAULT FALSE,
-  avatar          TEXT,                    -- foto exibida (URL ou data URL)
+  avatar          TEXT,
   points          INTEGER NOT NULL DEFAULT 0,
   welcome_seen    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-ALTER TABLE users ADD COLUMN IF NOT EXISTS google_picture TEXT;                          -- última foto vinda do Google
-ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_custom  BOOLEAN NOT NULL DEFAULT FALSE; -- TRUE = usuário escolheu a foto manualmente
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_picture TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_custom  BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version  INTEGER NOT NULL DEFAULT 0;     -- sobe a cada troca de senha: derruba as sessões antigas
 
 DO $$ BEGIN
@@ -64,7 +58,6 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- ---------- Pedidos ----------
 CREATE TABLE IF NOT EXISTS orders (
   id              BIGSERIAL PRIMARY KEY,
   user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -88,17 +81,15 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_name              TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS requires_prescription    BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS prescription_choice      TEXT;         -- 'upload' | 'in_person'
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS prescription_resolved_at TIMESTAMPTZ;
--- Entrega por motoboy (simulada). Pedidos antigos continuam como retirada.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment              TEXT NOT NULL DEFAULT 'pickup';  -- 'pickup' | 'delivery'
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_fee             NUMERIC(10,2) NOT NULL DEFAULT 0;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address         TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_km              NUMERIC(5,2);
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_minutes         SMALLINT;      -- prazo prometido ao cliente
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_minutes         SMALLINT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_name             TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_vehicle          TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_plate            TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS courier_rating           NUMERIC(2,1);
--- Retirada confirmada no balcão da farmácia (frontend/pharmacy.html).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_validated_at      TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_validated_by      TEXT;
 CREATE INDEX IF NOT EXISTS orders_user_idx ON orders(user_id, created_at DESC);
@@ -115,7 +106,6 @@ CREATE TABLE IF NOT EXISTS order_items (
 );
 CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items(order_id);
 
--- Receita anexada ao pedido (arquivo guardado como data URL).
 CREATE TABLE IF NOT EXISTS prescriptions (
   order_id    BIGINT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
   file_name   TEXT NOT NULL,
@@ -124,7 +114,6 @@ CREATE TABLE IF NOT EXISTS prescriptions (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ---------- Pontos ----------
 CREATE TABLE IF NOT EXISTS user_coupons (
   id             BIGSERIAL PRIMARY KEY,
   user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -146,7 +135,6 @@ CREATE TABLE IF NOT EXISTS points_history (
 );
 CREATE INDEX IF NOT EXISTS points_history_user_idx ON points_history(user_id, created_at DESC);
 
--- ---------- Lembretes ----------
 CREATE TABLE IF NOT EXISTS reminders (
   id         BIGSERIAL PRIMARY KEY,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -159,16 +147,14 @@ CREATE TABLE IF NOT EXISTS reminders (
 );
 CREATE INDEX IF NOT EXISTS reminders_user_idx ON reminders(user_id);
 
--- ---------- Estoque em casa ----------
--- Quantas unidades a pessoa tem de cada remédio, para avisar antes de acabar.
 CREATE TABLE IF NOT EXISTS med_stocks (
   id          BIGSERIAL PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  medicine    TEXT NOT NULL,                        -- nome como a pessoa escreveu
+  medicine    TEXT NOT NULL,
   med_key     TEXT NOT NULL,                        -- nome normalizado (sem acento, minúsculo)
-  units       NUMERIC(7,1) NOT NULL DEFAULT 0,      -- quantas unidades ainda tem
+  units       NUMERIC(7,1) NOT NULL DEFAULT 0,
   unit_label  TEXT NOT NULL DEFAULT 'comprimidos',
-  per_dose    NUMERIC(4,1) NOT NULL DEFAULT 1,      -- quantas unidades por horário
+  per_dose    NUMERIC(4,1) NOT NULL DEFAULT 1,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, med_key)
 );

@@ -1,5 +1,3 @@
-// Central de avisos do app: queda de preço e retirada confirmada pela farmácia.
-
 const express = require('express');
 const { query } = require('../db');
 const { asyncHandler } = require('../errors');
@@ -31,7 +29,6 @@ router.get('/', asyncHandler(async (req, res) => {
   });
 }));
 
-// Marca avisos como lidos (sem ids, marca todos).
 router.post('/read', asyncHandler(async (req, res) => {
   const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Number.isFinite);
   if (ids.length) {

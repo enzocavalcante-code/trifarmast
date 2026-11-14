@@ -1,11 +1,6 @@
-/* Testes da API do Trifarmas contra um PostgreSQL de verdade.
- *
- * Como rodar:
+/* Como rodar:
  *   createdb trifarmas_test
  *   DATABASE_URL=postgres://postgres@localhost:5432/trifarmas_test npm test
- *
- * O arquivo sobe o próprio servidor numa porta de teste, espera o /health e
- * conversa com a API por HTTP — do jeito que o app e o site conversam.
  */
 
 const test = require('node:test');
@@ -19,8 +14,6 @@ const PIN = '4321';
 const DEMO = { email: 'trifarmas@gmail.com', password: '123456' };
 
 let server;
-
-/* ---------------- utilidades ---------------- */
 
 async function call(method, path, { body, token, pin } = {}) {
   const headers = { 'Content-Type': 'application/json' };
@@ -44,7 +37,6 @@ const del = (path, options) => call('DELETE', path, options);
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const uniqueEmail = suffix => `teste.${Date.now()}.${suffix}@trifarmas.test`;
 
-// Espera o pedido chegar em "Pronto para retirar" (o status avança com o tempo).
 async function waitForReady(token, orderId, timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -55,8 +47,6 @@ async function waitForReady(token, orderId, timeoutMs = 20000) {
   }
   throw new Error(`O pedido ${orderId} não ficou pronto no tempo esperado.`);
 }
-
-/* ---------------- sobe e derruba a API ---------------- */
 
 test.before(async () => {
   if (!process.env.DATABASE_URL) throw new Error('Defina DATABASE_URL apontando para um banco de testes.');
@@ -84,15 +74,13 @@ test.before(async () => {
     try {
       const res = await fetch(`${BASE}/health`);
       if (res.ok) return;
-    } catch { /* ainda subindo */ }
+    } catch {}
     await wait(400);
   }
   throw new Error(`A API não respondeu /health:\n${log}`);
 });
 
 test.after(() => { if (server) server.kill(); });
-
-/* ---------------- testes ---------------- */
 
 test('health e cabeçalhos de segurança', async () => {
   const { status, data, headers } = await get('/health');
@@ -130,7 +118,6 @@ test('cadastro valida os dados e cria a conta', async () => {
   assert.equal(data.user.points, 0, 'conta nova começa com 0 pontos');
   assert.equal(data.showWelcome, true, 'boas-vindas na primeira entrada');
 
-  // E-mail repetido não cria outra conta, e as boas-vindas não voltam.
   assert.equal((await post('/api/auth/signup', { name: 'Outra', email, password: 'senha123' })).status, 409);
   const again = await post('/api/auth/login', { email, password: 'senha123' });
   assert.equal(again.data.showWelcome, false);
@@ -154,7 +141,6 @@ test('pedido: criação, código de retirada e confirmação pela farmácia', as
   assert.equal(order.points, Math.floor(order.paidAmount));
   assert.equal(order.status, 'Pedido recebido');
 
-  // O painel da farmácia exige a senha do balcão.
   assert.equal((await post('/api/pickups/lookup', { code: order.code, pin: 'errado' })).status, 401);
   assert.equal((await post('/api/pickups/lookup', { code: '000000', pin: PIN })).status, 404);
   assert.equal((await post('/api/pickups/lookup', { code: '12', pin: PIN })).status, 400);
@@ -165,7 +151,6 @@ test('pedido: criação, código de retirada e confirmação pela farmácia', as
   assert.equal(lookup.data.order.items.length, 2);
   assert.equal(lookup.data.order.customerFirstName, 'Trifarmas');
 
-  // Antes de ficar pronto, a farmácia não consegue confirmar.
   const early = await post('/api/pickups/confirm', { code: order.code, pin: PIN });
   assert.equal(early.status, 400);
 
@@ -175,7 +160,6 @@ test('pedido: criação, código de retirada e confirmação pela farmácia', as
   assert.equal(confirmed.data.confirmed, true);
   assert.equal(confirmed.data.order.status, 'Concluído');
 
-  // Pontos creditados e o código não serve mais.
   const { data: points } = await get('/api/points', { token });
   assert.equal(points.points, pointsBefore + order.points);
   assert.equal((await post('/api/pickups/confirm', { code: order.code, pin: PIN })).status, 404);
@@ -198,7 +182,6 @@ test('pedido com receita fica parado até o usuário escolher como apresentá-la
   assert.equal(order.requiresPrescription, true);
   assert.equal(order.status, 'Aguardando receita');
 
-  // Enquanto não escolher, a farmácia não entrega.
   const blocked = await post('/api/pickups/confirm', { code: order.code, pin: PIN });
   assert.equal(blocked.status, 400);
   assert.match(blocked.data.error, /receita/i);
@@ -207,7 +190,6 @@ test('pedido com receita fica parado até o usuário escolher como apresentá-la
   const chosen = await post(`/api/orders/${order.id}/prescription`, { choice: 'in_person' }, { token });
   assert.equal(chosen.status, 200);
   assert.equal(chosen.data.order.status, 'Em preparação');
-  // A escolha vale uma vez só.
   assert.equal((await post(`/api/orders/${order.id}/prescription`, { choice: 'upload' }, { token })).status, 400);
 });
 
@@ -220,7 +202,6 @@ test('preços e quantidades vêm do banco, não do navegador', async () => {
   assert.equal((await post('/api/orders', { pharmacyId: 'nao-existe', paymentMethod: 'Pix', items: [{ medicineId: 'm1', quantity: 1 }] }, { token })).status, 404);
   assert.equal((await post('/api/orders', { pharmacyId: 'p1', paymentMethod: 'Pix', items: [{ medicineId: 'nao-existe', quantity: 1 }] }, { token })).status, 404);
 
-  // Preço enviado pelo cliente é ignorado: vale o do catálogo.
   const { data: catalog } = await get('/api/catalog');
   const expected = catalog.medicines.find(m => m.id === 'm1').prices.p1;
   const { data } = await post('/api/orders', {
@@ -255,7 +236,6 @@ test('cupom: troca por pontos, desconto no pedido e não serve duas vezes', asyn
   }, { token });
   assert.equal(reused.status, 400);
 
-  // Cupom de outra pessoa também não serve.
   const email = uniqueEmail('cupom');
   const { data: other } = await post('/api/auth/signup', { name: 'Outra Pessoa', email, password: 'senha123' });
   const stolen = await post('/api/orders', {
@@ -269,9 +249,9 @@ test('cupom com compra mínima só vale acima do valor', async () => {
   const { data: session } = await post('/api/auth/login', DEMO);
   const token = session.token;
   const { data: points } = await get('/api/points', { token });
-  if (points.points < 380) return; // saldo insuficiente nesta execução
+  if (points.points < 380) return;
 
-  const { data } = await post('/api/points/rewards/r3/redeem', {}, { token }); // R$20, mínimo R$80
+  const { data } = await post('/api/points/rewards/r3/redeem', {}, { token });
   const small = await post('/api/orders', {
     pharmacyId: 'p1', paymentMethod: 'Pix', couponId: data.coupon.id,
     items: [{ medicineId: 'm1', quantity: 1 }],

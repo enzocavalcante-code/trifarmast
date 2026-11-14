@@ -1,18 +1,8 @@
-/* =============================================================
-   Painel da farmácia (balcão).
-   Quem atende digita o código de 6 números do cliente, confere o que entregar
-   e confirma a entrega. É essa confirmação que conclui o pedido e credita os
-   pontos — o cliente não consegue fazer isso sozinho pelo app.
-
-   A senha do balcão é a variável PHARMACY_PIN no servidor. Ela fica guardada
-   só neste aparelho (sessionStorage), até fechar a aba.
-   ============================================================= */
+/* A senha do balcão (PHARMACY_PIN) fica só no sessionStorage, até fechar a aba. */
 
 const PIN_KEY = 'trifarmas-pharmacy-pin';
 let pharmacyPin = '';
 let currentOrder = null;
-
-/* ---------------- utilidades ---------------- */
 
 const el = id => document.getElementById(id);
 const formatBRL = value => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -38,16 +28,13 @@ function showError(boxId, message){
 
 const hideError = boxId => el(boxId).classList.add('hidden');
 
-/* ---------------- entrar e sair ---------------- */
-
 function initCounter(){
-  // Mesmo tema e tamanho de texto escolhidos no app.
   try{
     const theme = JSON.parse(localStorage.getItem('trifarmas-theme'));
     if(theme === 'dark') document.body.setAttribute('data-theme', 'dark');
     const scale = Number(JSON.parse(localStorage.getItem('trifarmas-font-scale')));
     if(scale) document.documentElement.style.setProperty('--fs', scale);
-  }catch{ /* primeira visita */ }
+  }catch{}
 
   const saved = sessionStorage.getItem(PIN_KEY);
   if(saved){
@@ -72,9 +59,8 @@ async function enterCounter(){
   hideError('counter-error');
   try{
     await api.pickupLookup('000000', pin);
-    acceptPin(pin);                       // improvável, mas o código existia
+    acceptPin(pin);
   }catch(e){
-    // 404 (código não encontrado) significa que a senha passou.
     if(e.status === 404) acceptPin(pin);
     else showError('counter-error', e.message);
   }
@@ -97,8 +83,6 @@ function leaveCounter(){
   el('counter-login').classList.remove('hidden');
   el('counter-pin').focus();
 }
-
-/* ---------------- conferir e confirmar ---------------- */
 
 function onCodeInput(input){
   input.value = input.value.replace(/\D/g, '').slice(0, 6);

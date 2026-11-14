@@ -1,14 +1,9 @@
-// Leitura dos dados da conta (pedidos, lembretes e pontos).
-// Fica fora das rotas porque o login também devolve tudo isso de uma vez:
-// assim o app entra na conta com UMA requisição, em vez de quatro.
-
 const { query } = require('./db');
 const serialize = require('./serializers');
 const { listStocks } = require('./stocks');
 
-const BOOTSTRAP_ORDERS = 20;   // os mais recentes bastam para abrir o app
+const BOOTSTRAP_ORDERS = 20;
 
-// Carrega pedidos com itens e o nome do arquivo de receita (sem o conteúdo do arquivo).
 async function loadOrders(db, userId, orderId = null, limit = null) {
   const { rows: orders } = await db.query(
     `SELECT * FROM orders
@@ -52,7 +47,6 @@ async function loadReminders(userId) {
   return rows.map(serialize.reminder);
 }
 
-// Tudo o que o app precisa logo depois de entrar, numa requisição só.
 async function loadAccountData(userId) {
   const [orders, reminders, points, stocks] = await Promise.all([
     loadOrders({ query }, userId, null, BOOTSTRAP_ORDERS),

@@ -1,7 +1,3 @@
-// Proteções do servidor, sem dependências novas:
-//  - cabeçalhos de segurança em todas as respostas;
-//  - limites de tentativas, guardados na memória do processo.
-
 const { HttpError } = require('./errors');
 
 function securityHeaders(req, res, next) {
@@ -10,7 +6,6 @@ function securityHeaders(req, res, next) {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
-  // A API só responde JSON: nada de script, imagem ou frame vindo dela.
   res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
   // Dados de conta não ficam guardados em cache de navegador ou de rede
   // (o catálogo, que é público, troca este cabeçalho na própria rota).
@@ -30,16 +25,14 @@ function clientIp(req) {
   return String(cloudflare || req.ip || '').trim();
 }
 
-/* ---------------- limite de tentativas ---------------- */
-
 const MAX_BUCKETS = 100000;
-const buckets = new Map();   // chave -> { count, resetAt }
+const buckets = new Map();
 
 function hit(key, windowMs, max) {
   const now = Date.now();
   const bucket = buckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
-    if (buckets.size >= MAX_BUCKETS) buckets.delete(buckets.keys().next().value);   // a memória não cresce sem fim
+    if (buckets.size >= MAX_BUCKETS) buckets.delete(buckets.keys().next().value);
     buckets.set(key, { count: 1, resetAt: now + windowMs });
     return { allowed: true, retryAfter: 0 };
   }
@@ -50,7 +43,6 @@ function hit(key, windowMs, max) {
   return { allowed: true, retryAfter: 0 };
 }
 
-// Limpa chaves vencidas de vez em quando.
 const cleanup = setInterval(() => {
   const now = Date.now();
   for (const [key, bucket] of buckets) if (bucket.resetAt <= now) buckets.delete(key);
@@ -65,7 +57,6 @@ function tooMany(message, retryAfter) {
   return error;
 }
 
-/* Middleware: conta todo pedido. `key` diz de quem é a conta (padrão: o IP). */
 function rateLimit({ windowMs = 15 * 60 * 1000, max = 20, name = 'req', key = clientIp, message = null } = {}) {
   return (req, res, next) => {
     const { allowed, retryAfter } = hit(`${name}:${key(req)}`, windowMs, max);

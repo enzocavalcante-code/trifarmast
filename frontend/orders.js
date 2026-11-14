@@ -1,10 +1,4 @@
-/* =============================================================
-   Pedidos e receitas médicas
-   - O servidor calcula o status; aqui só agendamos a atualização da tela
-     nos horários informados (order.timeline).
-   - Pedidos com remédio que exige receita ficam em "Aguardando receita"
-     até o usuário anexar o arquivo ou escolher mostrar na retirada.
-   ============================================================= */
+/* O status é calculado pelo servidor; aqui só se agenda a atualização da tela nos horários de order.timeline. */
 
 const STATUS = {
   RECEIVED: 'Pedido recebido',
@@ -27,18 +21,14 @@ const STATUS_BADGE_CLASS = {
   [STATUS.DELIVERED]: 'status-done',
 };
 
-// Pedido entregue por motoboy (o outro caso é retirada no balcão).
 const orderIsDelivery = o => o.fulfillment === 'delivery';
 const isFinalStatus = s => s === STATUS.DONE || s === STATUS.DELIVERED;
-// Momento em que o usuário confirma: no balcão ou na porta de casa.
 const isHandover = o => o.status === (orderIsDelivery(o) ? STATUS.ARRIVED : STATUS.READY);
 const RX_MAX_BYTES = 8 * 1024 * 1024;
 const RX_ACCEPT = 'application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif';
 
 let orderTimers = [];
 let uploadingOrderId = null;
-
-/* ---------------- estado ---------------- */
 
 const normalizeOrder = o => ({ ...o, createdAt: new Date(o.createdAt) });
 
@@ -48,7 +38,6 @@ function setOrders(list){
   state.orders.forEach(scheduleOrderProgress);
 }
 
-// Insere ou substitui um pedido vindo do servidor e reagenda os avanços de status.
 function addOrder(order){
   const normalized = normalizeOrder(order);
   const idx = state.orders.findIndex(o => o.id === normalized.id);
@@ -84,7 +73,6 @@ function advanceOrder(orderId, status){
   if(status === STATUS.ARRIVED) showToast(`O motoboy chegou com o pedido #${order.id}! Confirme o recebimento.`);
 }
 
-// Badge na navegação: pedidos que precisam de uma ação do usuário.
 function updateOrdersBadge(){
   const count = state.orders.filter(o => isHandover(o) || o.status === STATUS.WAITING_RX).length;
   document.querySelectorAll('[data-tab="orders"] .nav-badge, [data-tab="orders"] .bn-dot').forEach(el => el.remove());
@@ -95,9 +83,6 @@ function updateOrdersBadge(){
   if(bnBtn) bnBtn.insertAdjacentHTML('beforeend', `<span class="bn-dot"></span>`);
 }
 
-/* ---------------- tela ---------------- */
-
-// Etapas mostradas na linha do tempo (rótulos curtos para caber no celular).
 function orderSteps(order){
   const steps = orderIsDelivery(order)
     ? [{ s: STATUS.RECEIVED, label: 'Recebido' }, { s: STATUS.PREPARING, label: 'Em preparação' },
@@ -113,7 +98,6 @@ function renderTracker(order){
   let doneIdx = steps.findIndex(s => s.s === order.status);
   let currentIdx = -1;
   if(order.status === STATUS.WAITING_RX){ doneIdx = 0; currentIdx = 1; }
-  // "Motoboy chegou" acende a etapa "A caminho" e deixa "Entregue" piscando.
   if(order.status === STATUS.ARRIVED){
     doneIdx = steps.findIndex(s => s.s === STATUS.OUT);
     currentIdx = doneIdx + 1;
@@ -128,8 +112,6 @@ function renderTracker(order){
   </div>`;
 }
 
-/* ---------------- entrega: motoboy a caminho (simulação) ---------------- */
-
 const ICON_MOTO_SMALL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/><path d="M8 17h8l-3.5-6H16l-2-3h-3"/><path d="M5 17l3.5-6H6"/><path d="M14 8h4"/></svg>';
 // Trajeto em forma de ruas (esquina a esquina) dentro do quadro de 320x180.
 // (começa e termina um pouco antes dos pinos, para o motoboy não cobrir a farmácia nem a casa)
@@ -137,7 +119,6 @@ const DELIVERY_ROUTE = 'M 46 148 L 96 148 L 96 96 L 198 96 L 198 44 L 262 44';
 
 let deliveryTicker = null;
 
-// Em que ponto da simulação o pedido está: preparando, a caminho ou chegou.
 function deliveryPhase(order){
   const d = order.delivery;
   if(!d || !d.dispatchedAt || !d.arrivesAt) return { phase: 'preparing', t: 0, minutesLeft: d ? d.minutes : 0 };
@@ -155,7 +136,6 @@ function courierInitials(name){
   return ((parts[0] || '?')[0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
 }
 
-// Painel ao vivo: mapa simplificado, tempo restante e dados do motoboy.
 function renderDeliveryTrack(order){
   if(!orderIsDelivery(order) || isFinalStatus(order.status)) return '';
   if(order.status === STATUS.WAITING_RX) return '';
@@ -223,7 +203,6 @@ function renderDeliveryTrack(order){
   </div>`;
 }
 
-// Move o motoboy e atualiza o tempo restante (roda a cada 0,4 s).
 function updateDeliveryView(order){
   const wrap = $(`deliv-${order.id}`);
   if(!wrap) return;
@@ -256,7 +235,6 @@ function updateDeliveryView(order){
   }
 }
 
-// Mantém um único cronômetro para todas as entregas em andamento.
 function setupDeliveryViews(){
   tickDeliveries();
   if(!deliveryTicker) deliveryTicker = setInterval(tickDeliveries, 400);
@@ -272,7 +250,6 @@ function tickDeliveries(){
   active.forEach(updateDeliveryView);
 }
 
-// Contato com o motoboy: simulado, como o restante da entrega.
 function contactCourier(orderId, mode){
   const order = state.orders.find(o => o.id === orderId);
   const name = order && order.delivery && order.delivery.courier ? order.delivery.courier.name : 'o motoboy';
@@ -395,12 +372,9 @@ async function confirmPickup(orderId){
   }
 }
 
-/* ---------------- receita ---------------- */
-
 async function prescriptionFileToDataUrl(file){
-  // Fotos são reduzidas (continuam legíveis) para o envio ser rápido no 4G.
   if(/^image\/(jpeg|png|webp)$/.test(file.type)){
-    try{ return await resizeImage(file, 2000, { quality: 0.85 }); }catch{ /* envia o original */ }
+    try{ return await resizeImage(file, 2000, { quality: 0.85 }); }catch{}
   }
   return readFileAsDataURL(file);
 }

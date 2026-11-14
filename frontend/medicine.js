@@ -1,17 +1,9 @@
-/* =============================================================
-   Tela do remédio, histórico de preço, genérico equivalente,
-   avisos de queda de preço e central de avisos.
-   ============================================================= */
-
 const medScreen = { medId: null, loading: false };
-const historyCache = new Map();   // medId -> histórico vindo da API
-
-/* ---------------- avisos de preço ---------------- */
+const historyCache = new Map();
 
 const isWatchingPrice = medId => state.priceAlerts.some(a => a.medicineId === medId);
 const alertFor = medId => state.priceAlerts.find(a => a.medicineId === medId) || null;
 
-// Sugestão de preço-alvo: 10% abaixo do menor preço de hoje.
 function suggestedTarget(med){
   const lowest = lowestPrice(med);
   if(lowest === null) return '';
@@ -40,7 +32,6 @@ async function togglePriceAlert(medId, targetPrice = null){
   }
 }
 
-// Cria/atualiza o aviso com o preço digitado na tela do remédio.
 async function savePriceAlertFromScreen(medId){
   const input = $('alert-target');
   const raw = input ? input.value.replace(',', '.').trim() : '';
@@ -54,10 +45,7 @@ async function savePriceAlertFromScreen(medId){
   await togglePriceAlert(medId, target);
 }
 
-/* ---------------- gráfico do histórico ---------------- */
-
-/* Desenho simples em SVG (sem biblioteca): linha do menor preço do dia.
-   vector-effect mantém a espessura da linha mesmo com o SVG esticado. */
+/* vector-effect mantém a espessura da linha mesmo com o SVG esticado. */
 function priceChartSvg(days){
   const values = days.map(d => d.min);
   const lowest = Math.min(...values);
@@ -119,8 +107,6 @@ function historyBlock(history){
       <span>${shortDate(last.day)}</span>
     </div>`;
 }
-
-/* ---------------- tela do remédio ---------------- */
 
 function openMedicine(medId){
   const med = medById(medId);
@@ -277,8 +263,6 @@ function renderMedicineScreen(){
     </div></div>`;
 }
 
-/* ---------------- central de avisos ---------------- */
-
 function updateNotificationsBadge(){
   const badge = $('notif-count');
   const count = state.notifications.unread || 0;
@@ -290,7 +274,7 @@ async function refreshNotifications(){
   try{
     state.notifications = await api.notifications();
     updateNotificationsBadge();
-  }catch{ /* mantém o que já está na tela */ }
+  }catch{}
 }
 
 function openNotifications(){
@@ -346,7 +330,6 @@ function openNotifications(){
   back.onclick = e => { if(e.target === back) back.remove(); };
   document.body.appendChild(back);
 
-  // Abrir a central marca os avisos como lidos.
   if(state.notifications.unread > 0){
     api.markNotificationsRead().catch(()=>{});
     state.notifications.unread = 0;

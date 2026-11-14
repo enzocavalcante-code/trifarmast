@@ -1,8 +1,4 @@
-/* Testes de segurança da API do Trifarmas (mesmo esquema do api.test.js):
- *   DATABASE_URL=postgres://postgres@localhost:5432/trifarmas_test node --test test/
- *
- * Cada teste tenta um ataque e confere que o servidor recusa.
- */
+/* DATABASE_URL=postgres://postgres@localhost:5432/trifarmas_test node --test test/ */
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -18,8 +14,6 @@ const SITE = 'https://trifarmas.vercel.app';
 const DEMO = { email: 'trifarmas@gmail.com', password: '123456' };
 
 let server;
-
-/* ---------------- utilidades ---------------- */
 
 // `network` simula a rede de quem chama: é o IP que a hospedagem anota no fim
 // do X-Forwarded-For. `forged` é o que um atacante escreveria no começo dele.
@@ -66,8 +60,6 @@ const dataUrl = (mime, bytes) => `data:${mime};base64,${Buffer.from(bytes).toStr
 const JPEG_HEAD = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
 const jpeg = (size = 2000) => dataUrl('image/jpeg', Buffer.concat([Buffer.from(JPEG_HEAD), Buffer.alloc(size, 7)]));
 
-/* ---------------- sobe e derruba a API ---------------- */
-
 test.before(async () => {
   if (!process.env.DATABASE_URL) throw new Error('Defina DATABASE_URL apontando para um banco de testes.');
   server = spawn(process.execPath, ['src/server.js'], {
@@ -94,15 +86,13 @@ test.before(async () => {
     try {
       const res = await fetch(`${BASE}/api/catalog`);
       if (res.ok) return;
-    } catch { /* ainda subindo */ }
+    } catch {}
     await wait(400);
   }
   throw new Error(`A API não ficou pronta:\n${log}`);
 });
 
 test.after(() => { if (server) server.kill(); });
-
-/* ---------------- cabeçalhos e origem ---------------- */
 
 test('respostas não entregam a tecnologia do servidor nem ficam em cache', async () => {
   const account = await newAccount('cabecalho');
@@ -120,8 +110,6 @@ test('só o site autorizado recebe permissão do navegador para chamar a API', a
   const fromElsewhere = await get('/api/catalog', { origin: 'https://site-malicioso.example' });
   assert.equal(fromElsewhere.headers.get('access-control-allow-origin'), null);
 });
-
-/* ---------------- sessão (token) ---------------- */
 
 test('token forjado, sem assinatura ou com outro algoritmo é recusado', async () => {
   const account = await newAccount('token');
@@ -150,8 +138,6 @@ test('trocar a senha derruba as sessões abertas em outros aparelhos', async () 
   assert.equal((await get('/api/me', { token: changed.data.token })).status, 200);
   assert.equal((await post('/api/auth/login', { email: account.email, password: account.password })).status, 401);
 });
-
-/* ---------------- conta ---------------- */
 
 test('cadastro recusa senha fraca, senha gigante, nome gigante e e-mail torto', async () => {
   const network = newNetwork();
@@ -208,8 +194,6 @@ test('login do Google recusa credencial inválida, e a conta demo fica desligada
   assert.equal((await post('/api/auth/google', { mode: 'signup' })).status, 401);
   assert.equal((await post('/api/auth/google-demo', { mode: 'signup' })).status, 403, 'com o Google configurado não existe conta demo');
 });
-
-/* ---------------- arquivos e tamanho dos pedidos ---------------- */
 
 test('foto de perfil: só imagem de verdade, pequena e enviada pelo app', async () => {
   const account = await newAccount('foto');
@@ -269,14 +253,11 @@ test('receita: o conteúdo do arquivo precisa bater com o tipo; código de retir
   assert.equal((await send(dataUrl('text/html', '<script>alert(1)</script>'))).status, 400);
   assert.equal((await send(dataUrl('application/pdf', '%PDF-1.7\n1 0 obj'))).status, 200);
 
-  // Outra conta não enxerga nem mexe neste pedido.
   const stranger = await newAccount('estranho');
   assert.equal((await get(`/api/orders/${order.id}/prescription`, { token: stranger.token })).status, 404);
   assert.equal((await post(`/api/orders/${order.id}/pickup`, {}, { token: stranger.token })).status, 404);
   assert.equal((await get('/api/orders', { token: stranger.token })).data.length, 0);
 });
-
-/* ---------------- força bruta ---------------- */
 
 test('IP inventado no X-Forwarded-For não escapa do limite de senha', async () => {
   const account = await newAccount('ip-falso');
@@ -347,7 +328,7 @@ test('IP de quem chama: no Render vale o cabeçalho da Cloudflare, fora dele nã
   process.env.RENDER = before || '';
 });
 
-/* ---------------- painel da farmácia (por último: trava o painel) ---------------- */
+/* Por último: estes testes travam o painel da farmácia. */
 
 test('senha do balcão: 10 erros travam a rede, a senha certa não gasta tentativa', async () => {
   const lookup = (pin, network) => post('/api/pickups/lookup', { code: '000000', pin }, { network });

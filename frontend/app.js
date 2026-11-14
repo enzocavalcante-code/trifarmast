@@ -1,10 +1,3 @@
-/* =============================================================
-   Trifarmas — front-end (Vercel)
-   Núcleo do app: login, navegação, busca, pontos, lembretes e perfil.
-   Outros módulos: location.js (mapa), cart.js (carrinho e pagamento),
-   orders.js (pedidos e receitas). Os dados ficam no backend (Render).
-   ============================================================= */
-
 const { GOOGLE_CLIENT_ID } = window.TRIFARMAS_CONFIG;
 
 const LOGO_SRC = 'assets/logo.png';
@@ -34,7 +27,7 @@ const state = {
   resultsLimit: RESULTS_PAGE_SIZE,
   expandedMeds: new Set(),
   reminders:[],
-  stocks:[],          // quantas unidades a pessoa tem em casa, por remédio
+  stocks:[],
   orders:[],
   calMonth: new Date().getMonth(),
   calYear: new Date().getFullYear(),
@@ -42,8 +35,6 @@ const state = {
   catalog: { pharmacies: [], medicines: [], rewards: [] },
   pointsInfo: { pending: 0, coupons: [], history: [] },
 };
-
-/* ---------------- utilidades ---------------- */
 
 const $ = id => document.getElementById(id);
 const formatBRL = value => Number(value || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
@@ -53,12 +44,11 @@ function escapeHtml(str){
   return String(str ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// Remove acentos para buscas ("dipirona" encontra "Dipirona Sódica").
 const normalizeText = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const storage = {
   get(key){ try{ return JSON.parse(localStorage.getItem(key)); }catch{ return null; } },
-  set(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch{ /* modo privado */ } },
+  set(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch{} },
 };
 
 function readFileAsDataURL(file){
@@ -70,8 +60,6 @@ function readFileAsDataURL(file){
   });
 }
 
-// Reduz a imagem antes de enviar (fotos de celular têm vários MB).
-// square=true recorta no centro (usado na foto de perfil).
 async function resizeImage(file, maxSize, { square = false, quality = 0.85 } = {}){
   const url = URL.createObjectURL(file);
   try{
@@ -104,10 +92,6 @@ function applyLogo(){
   document.querySelectorAll('.app-logo-img').forEach(img=> img.src = LOGO_SRC);
 }
 
-/* ---------------- ver a senha ----------------
-   Cada campo de senha tem um botão de olho ao lado. Mostrar a senha ajuda
-   muita gente a não errar a digitação — principalmente no celular. */
-
 const ICON_EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
 const ICON_EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.6 6.2A9.8 9.8 0 0112 6c6.4 0 10 7 10 7a17 17 0 01-3.2 4M6.6 6.6A17 17 0 002 13s3.6 7 10 7a9.7 9.7 0 005.4-1.6"/><path d="M9.9 9.9a3 3 0 004.2 4.2"/><path d="M3 3l18 18"/></svg>';
 
@@ -121,12 +105,10 @@ function togglePassword(button){
   const label = show ? 'Ocultar senha' : 'Mostrar senha';
   button.setAttribute('aria-label', label);
   button.setAttribute('title', label);
-  // volta o cursor para o fim do que já foi digitado
   input.focus();
-  try{ input.setSelectionRange(input.value.length, input.value.length); }catch{ /* alguns navegadores não permitem */ }
+  try{ input.setSelectionRange(input.value.length, input.value.length); }catch{}
 }
 
-// Desenha o olho em todos os campos de senha ao abrir o app.
 function setupPasswordToggles(){
   document.querySelectorAll('.pass-toggle').forEach(button=>{
     button.innerHTML = ICON_EYE;
@@ -141,14 +123,9 @@ function showView(name){
   $('view-signup').classList.toggle('hidden', name!=='signup');
   $('view-loading').classList.toggle('hidden', name!=='loading');
   $('login-error').classList.add('hidden');
-  // Voltando para a tela inicial, o convite do Google não faz mais sentido.
   if(name !== 'signup' && typeof hideGoogleInvite === 'function') hideGoogleInvite();
   renderGoogleButtons();
 }
-
-/* ---------------- catálogo (vem do banco) ----------------
-   O catálogo muda raramente. Guardamos uma cópia no aparelho para a busca
-   funcionar na hora, e buscamos a versão nova em segundo plano. */
 
 const CATALOG_KEY = 'trifarmas-catalog';
 const CATALOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -184,8 +161,6 @@ const medById = id => allMeds().find(m=>m.id===id);
 const pharmacyById = id => state.catalog.pharmacies.find(p=>p.id===id);
 const faviconUrl = domain => `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
 
-// Logo da farmácia (ícone do site da rede). Sem site conhecido, ou se o ícone não
-// carregar, mostra a inicial do nome num quadrado colorido.
 function pharmacyLogoHtml(pharm, extraClass = ''){
   const letter = escapeHtml((pharm.name || '?').trim().charAt(0).toUpperCase());
   const hue = [...(pharm.name || '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 140);
@@ -204,24 +179,18 @@ function logoFallback(img){
   img.replaceWith(div);
 }
 
-/* ---------------- foto de perfil ---------------- */
-
-// Avatar com as iniciais, gerado no próprio navegador (não depende de serviço externo).
 function initialsAvatar(name){
   const initials = String(name || 'T').trim().split(/\s+/).slice(0, 2).map(w => w.charAt(0).toUpperCase()).join('') || 'T';
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2fa85e"/><text x="50%" y="50%" dy=".35em" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="26" font-weight="700" fill="#fff">${escapeHtml(initials)}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-// Se a foto não carregar (link expirado, sem internet), mostra as iniciais.
 function setAvatar(img, src){
   img.referrerPolicy = 'no-referrer'; // necessário para fotos do Google
   img.onerror = () => { img.onerror = null; img.src = initialsAvatar(state.user && state.user.name); };
   img.src = src || initialsAvatar(state.user && state.user.name);
 }
 
-// A foto escolhida manualmente substitui a do Google e fica salva na conta.
-// Antes de salvar, a pessoa enquadra a foto do jeito que quiser.
 async function pickSettingsAvatar(input){
   const file = input.files && input.files[0];
   input.value = '';
@@ -229,7 +198,7 @@ async function pickSettingsAvatar(input){
   if(!/^image\//.test(file.type)){ showToast('Escolha uma imagem (JPG ou PNG).'); return; }
   try{
     const avatar = await recortarFoto(file);
-    if(!avatar) return;                       // a pessoa cancelou
+    if(!avatar) return;
     const { user } = await api.updateMe({ avatar });
     state.user = { ...state.user, ...user };
     refreshProfileUI();
@@ -237,10 +206,8 @@ async function pickSettingsAvatar(input){
   }catch(e){ showToast(e.message); }
 }
 
-/* Tela de enquadramento: arrasta para mover, barra para aproximar.
-   O mesmo desenho serve para a prévia e para a imagem salva, então o que a
-   pessoa vê no círculo é exatamente o que vai para a conta. */
-const AVATAR_PX = 320;   // tamanho salvo
+/* O mesmo desenho serve para a prévia e para a imagem salva: o que aparece no círculo é o que vai para a conta. */
+const AVATAR_PX = 320;
 const ICON_ARRASTAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M5 9l-3 3 3 3M19 9l3 3-3 3M9 5l3-3 3 3M9 19l3 3 3-3"/></svg>';
 const ICON_FOTO_P = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="7" width="14" height="11" rx="2"/><circle cx="9.5" cy="11" r="1.2"/><path d="M5 16l4-3 3 2 3-3 4 4"/></svg>';
 const ICON_FOTO_G = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><circle cx="8.5" cy="10" r="1.6"/><path d="M2.5 17l5.5-4.5 4 3 4-4 5.5 5.5"/></svg>';
@@ -363,8 +330,6 @@ async function resetGooglePhoto(){
   }catch(e){ showToast(e.message); }
 }
 
-/* ---------------- login com Google ---------------- */
-
 function isGoogleConfigured(){
   return !!GOOGLE_CLIENT_ID
     && GOOGLE_CLIENT_ID.endsWith('.apps.googleusercontent.com')
@@ -408,7 +373,6 @@ function initGoogleSignIn(){
   renderGoogleButtons();
 }
 
-/* Botão oficial do Google, com a mesma largura do botão "Entrar" e a cor do tema do app. */
 function renderGoogleButtons(){
   if(!googleSignInReady) return;
   const card = document.querySelector('#view-login:not(.hidden) .auth-card, #view-signup:not(.hidden) .auth-card');
@@ -416,7 +380,7 @@ function renderGoogleButtons(){
   const width = Math.round(Math.min(400, Math.max(200, inner)));
   const buttonOptions = {
     type:'standard', size:'large', shape:'pill', width, logo_alignment:'center',
-    theme: 'outline', // sempre branco, também no tema escuro
+    theme: 'outline',
   };
   $('google-btn-login').innerHTML = '';
   $('google-btn-signup').innerHTML = '';
@@ -426,15 +390,11 @@ function renderGoogleButtons(){
 
 const ICON_GOOGLE_G = '<svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.6 29.3 35.5 24 35.5c-6.4 0-11.7-4.6-12.8-10.8-.2-1-.2-2 0-3C12.3 15.6 17.6 11 24 11c3.1 0 5.9 1.2 8 3.1l6-6C34.6 4.9 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.2-.1-2.3-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.7 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l6-6C34.6 6.9 29.6 5 24 5c-7.6 0-14.1 4.3-17.7 9.7z"/><path fill="#4CAF50" d="M24 45c5.5 0 10.4-1.8 14.2-4.9l-6.6-5.5C29.6 36.4 26.9 37.5 24 37.5c-5.3 0-9.7-2.9-11.3-7.4l-6.6 5.1C9.7 41 16.3 45 24 45z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.2 5.6l6.6 5.5C38.9 40.8 45 35.5 45 24c0-1.2-.1-2.3-.4-3.5z"/></svg>';
 
-// Conta Google que tentou entrar sem ter cadastro (fica guardada até criar a conta).
 let pendingGoogleSignup = null;
 
 const isSignupView = () => !$('view-signup').classList.contains('hidden');
 
-/* O Google devolve um ID Token (JWT) assinado. Ele é enviado ao backend,
-   que valida a assinatura, recupera (ou cria, no cadastro) a conta e atualiza a foto. */
 async function handleGoogleCredential(response){
-  // Botão da tela inicial: só entra em conta que já existe. Botão da tela de cadastro: cria.
   const mode = isSignupView() ? 'signup' : 'login';
   try{
     const session = await api.googleLogin(response.credential, mode);
@@ -452,7 +412,6 @@ async function handleGoogleCredential(response){
   }
 }
 
-/* Sem conta no Trifarmas: leva para a tela de criar conta, já com os dados do Google. */
 function inviteGoogleSignup(profile, { credential = null, demo = false } = {}){
   pendingGoogleSignup = { profile, credential, demo };
   showView('signup');
@@ -478,7 +437,6 @@ function hideGoogleInvite(){
   if(box){ box.classList.add('hidden'); box.innerHTML = ''; }
 }
 
-/* Cria a conta com o mesmo acesso do Google que a pessoa acabou de usar. */
 async function confirmGoogleSignup(){
   if(!pendingGoogleSignup) return;
   const { credential, demo } = pendingGoogleSignup;
@@ -498,7 +456,6 @@ async function confirmGoogleSignup(){
   }
 }
 
-/* "Usar conta demo" — aparece só enquanto o GOOGLE_CLIENT_ID não estiver configurado. */
 async function googleAuthDemo(mode){
   try{
     const session = await api.googleDemo(mode);
@@ -515,10 +472,6 @@ async function googleAuthDemo(mode){
   }
 }
 
-/* ---------------- login / cadastro ---------------- */
-
-/* Desliga o botão enquanto a conta carrega, para não enviar duas vezes.
-   O texto do botão não muda. */
 async function withAuthButton(selector, task){
   const button = document.querySelector(selector);
   if(button) button.disabled = true;
@@ -567,7 +520,7 @@ async function doSignup(){
 function doLogout(){
   api.setToken(null);
   storage.set(SESSION_KEY, null);
-  if(ocrWorker){ try{ ocrWorker.terminate(); }catch{ /* já encerrado */ } ocrWorker = null; ocrWorkerPromise = null; }
+  if(ocrWorker){ try{ ocrWorker.terminate(); }catch{} ocrWorker = null; ocrWorkerPromise = null; }
   stopOrderTimers();
   if(typeof stopRefining === 'function') stopRefining();
   loc.manualAddress = false;
@@ -603,7 +556,7 @@ async function enterApp(session){
 
   $('view-login').classList.add('hidden');
   $('view-signup').classList.add('hidden');
-  $('view-loading').classList.add('hidden');   // tela de reconexão sai da frente
+  $('view-loading').classList.add('hidden');
   $('app').classList.remove('hidden');
   hideGoogleInvite();
 
@@ -617,16 +570,12 @@ async function enterApp(session){
   switchTab('home');
   initLocationSilently();
 
-  // Pop-up de boas-vindas: o servidor só libera na primeira entrada da conta.
   if(session.showWelcome) openWelcomePopup();
 
-  // Nada bloqueia a tela: se os dados não vieram no login, chegam agora.
   if(!hasData) refreshAccountData();
 }
 
-/* Reconecta a sessão guardada ao abrir ou atualizar a página.
-   O servidor gratuito pode estar dormindo, então insistimos algumas vezes
-   antes de desistir — só um token recusado (401) leva de volta ao login. */
+/* O servidor gratuito pode estar dormindo: insiste algumas vezes. Só um 401 leva de volta ao login. */
 async function restaurarSessao(token){
   showView('loading');
   api.setToken(token);
@@ -637,7 +586,7 @@ async function restaurarSessao(token){
       await enterApp({ token, user });
       return;
     }catch(e){
-      if(e.status === 401){            // token vencido ou conta apagada
+      if(e.status === 401){
         api.setToken(null);
         storage.set(SESSION_KEY, null);
         showView('login');
@@ -654,7 +603,6 @@ async function restaurarSessao(token){
   }
 }
 
-// Pedidos, lembretes e pontos que vieram junto com o login.
 function applyAccountData(data){
   if(!data) return false;
   setOrders(data.orders || []);
@@ -664,7 +612,6 @@ function applyAccountData(data){
   return true;
 }
 
-// Busca os mesmos dados pelas rotas separadas (plano B).
 async function refreshAccountData(){
   try{
     const [orders, reminders, pointsInfo, stocks] = await Promise.all([
@@ -703,8 +650,6 @@ function openWelcomePopup(){
 function closeWelcomePopup(){
   $('welcome-overlay').classList.add('hidden');
 }
-
-/* ---------------- navegação ---------------- */
 
 function buildNav(){
   $('sidebar-nav').innerHTML = NAV_ITEMS.map(it=>`
@@ -752,7 +697,6 @@ function applyTheme(theme){
     ? '<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>'
     : '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
 }
-// Tamanho do texto: multiplica todas as fontes do app (variável CSS --fs). Fica salvo neste aparelho.
 const FONT_SCALES = [0.9, 1, 1.15, 1.3];
 function applyFontScale(scale){
   const value = FONT_SCALES.includes(scale) ? scale : 1;
@@ -769,8 +713,6 @@ function toggleTheme(){
   applyTheme(state.theme==='light' ? 'dark' : 'light');
   storage.set('trifarmas-theme', state.theme);
 }
-
-/* ---------------- busca ---------------- */
 
 function buildChips(){
   const cats = ['Todos', ...new Set(state.catalog.medicines.map(m=>m.cat))];
@@ -856,7 +798,6 @@ function toggleMedPharmacies(medId){
   renderResults();
 }
 
-// Farmácias com preço para um remédio, ordenadas por preço e distância.
 function pharmacyOffers(med){
   return Object.entries(med.prices)
     .map(([pid, price])=>{
@@ -915,13 +856,6 @@ function renderMedCard(med){
   </article>`;
 }
 
-/* ---------------- scanner ---------------- */
-
-/* A câmera é a parte mais frágil do app: pode estar sem permissão, em uso por
-   outro aplicativo ou parar sozinha quando o celular é bloqueado. Por isso a
-   tela sempre mostra em que pé está e dá um caminho de saída — nunca fica
-   parada numa imagem congelada. */
-
 let scannerStream = null;
 let scannerStarting = false;
 let scannerTimer = null;
@@ -953,7 +887,6 @@ function setScannerUI(stateName, custom = {}){
   frame.dataset.state = stateName;
   $('scan-overlay').classList.toggle('hidden', live);
   $('scan-guide').classList.toggle('hidden', !live);
-  // O botão continua à vista, mas só funciona com a câmera no ar.
   const stop = $('scanner-stop');
   stop.hidden = false;
   stop.disabled = !live;
@@ -965,7 +898,6 @@ function setScannerUI(stateName, custom = {}){
   $('scanner-status').textContent = preset.caption || '';
 }
 
-// Mensagem clara para cada motivo de a câmera não abrir.
 function scannerErrorMessage(error){
   const name = error && error.name;
   if(name === 'NotAllowedError' || name === 'SecurityError'){
@@ -990,10 +922,7 @@ function showScannerError(message){
   });
 }
 
-// Tenta a câmera traseira (celular); se não houver, usa qualquer câmera.
-/* Pede a câmera traseira na maior resolução que o aparelho der: em 640×480 o
-   nome do remédio vira um borrão de poucos pixels e o leitor erra feio.
-   Se o aparelho não aceitar o pedido, vai afrouxando até a câmera simples. */
+/* Em 640×480 o nome do remédio vira um borrão e o leitor erra: pede a maior resolução e vai afrouxando se o aparelho recusar. */
 async function requestCamera(){
   const tries = [
     { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 },
@@ -1017,7 +946,6 @@ async function requestCamera(){
   throw lastError || new Error('sem câmera');
 }
 
-// Foco contínuo quando o navegador deixa (ajuda muito em texto pequeno).
 async function sharpenCameraTrack(stream){
   const track = stream.getVideoTracks()[0];
   if(!track || typeof track.getCapabilities !== 'function') return;
@@ -1026,7 +954,7 @@ async function sharpenCameraTrack(stream){
     const advanced = [];
     if(Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) advanced.push({ focusMode: 'continuous' });
     if(advanced.length) await track.applyConstraints({ advanced });
-  }catch{ /* o aparelho não deixa ajustar: segue com o padrão */ }
+  }catch{}
 }
 
 /* userAsked=false acontece ao abrir a aba: só liga sozinho se a permissão da
@@ -1076,7 +1004,6 @@ async function startScanner(userAsked = false){
     clearTimeout(scannerTimer);
     setScannerUI('live');
   };
-  // Se a câmera for interrompida (bloqueio de tela, outro app), avisa.
   stream.getVideoTracks().forEach(track => { track.onended = () => showScannerError('A câmera foi interrompida.'); });
 
   try{
@@ -1090,7 +1017,6 @@ async function startScanner(userAsked = false){
   }, 10000);
 }
 
-// Já autorizada antes? Então pode abrir sozinha ao entrar na aba.
 async function cameraAlreadyAllowed(){
   try{
     if(!navigator.permissions || !navigator.permissions.query) return false;
@@ -1125,7 +1051,6 @@ function stopScanner(userAsked = false){
   const wasOn = !!scannerStream || scannerStarting;
   stopScannerStream();
   if(!$('scanner-frame')) return;
-  // Só avisa que desligou se havia algo ligado.
   if(userAsked && wasOn) setScannerUI('off', { caption: 'Câmera desligada. Ligue de novo quando quiser.' });
   else if(wasOn || state.activeTab !== 'scanner') setScannerUI('off');
 }
@@ -1152,8 +1077,6 @@ function scanResult(medId){
   searchForTerm(med.name);
 }
 
-// Leva para a tela de compra com o remédio já pesquisado (preços por farmácia,
-// ordenados pela distância de onde a pessoa está).
 function searchForTerm(term){
   $('search-input').value = term;
   state.activeCat = 'Todos';
@@ -1166,11 +1089,6 @@ function searchForTerm(term){
     if(results) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, 120);
 }
-
-/* ---------------- ler o texto da caixa (OCR) ----------------
-   A câmera tira uma foto do que está na frente dela, o Tesseract lê as letras
-   e o app procura esse texto no catálogo. Funciona com a caixa do remédio, a
-   receita ou um papel escrito à mão em letra de forma. */
 
 const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
 let ocrWorker = null;
@@ -1188,7 +1106,6 @@ function loadScript(src){
   });
 }
 
-// O leitor é baixado na primeira leitura (~2 MB) e fica pronto para as próximas.
 async function getOcrWorker(onProgress){
   if(ocrWorker) return ocrWorker;
   if(ocrWorkerPromise) return ocrWorkerPromise;
@@ -1211,9 +1128,7 @@ async function getOcrWorker(onProgress){
   }
 }
 
-/* Só o pedaço dentro da moldura amarela vira foto. Ler a imagem inteira
-   trazia tudo o que estava em volta — e era daí que saíam as "palavras" que
-   faziam o app achar remédio em qualquer coisa. */
+/* Só o pedaço dentro da moldura vira foto: a imagem inteira trazia palavras soltas que faziam o app achar remédio em qualquer coisa. */
 function guideCrop(video){
   const full = { x: 0, y: 0, width: video.videoWidth, height: video.videoHeight };
   const frame = $('scanner-frame');
@@ -1227,7 +1142,7 @@ function guideCrop(video){
   const scale = Math.max(box.width / video.videoWidth, box.height / video.videoHeight);
   const hiddenX = (video.videoWidth * scale - box.width) / 2;
   const hiddenY = (video.videoHeight * scale - box.height) / 2;
-  const margin = 0.06;                                   // uma folga, para não cortar letra
+  const margin = 0.06;
   const left = (area.left - box.left + hiddenX) / scale - video.videoWidth * margin;
   const top = (area.top - box.top + hiddenY) / scale - video.videoHeight * margin;
   const width = area.width / scale + video.videoWidth * margin * 2;
@@ -1243,7 +1158,6 @@ function guideCrop(video){
   return (crop.width >= 80 && crop.height >= 80) ? crop : full;
 }
 
-// Recorte cru da moldura, sem tratar: é a base das versões que vão para o leitor.
 function grabRawFrame(){
   const video = $('scanner-video');
   if(!video || !video.videoWidth) return null;
@@ -1255,8 +1169,7 @@ function grabRawFrame(){
   return canvas;
 }
 
-/* Nitidez da foto (variação do Laplaciano): foto tremida tem pouca variação.
-   Serve para escolher o melhor quadro entre vários. */
+/* Nitidez pela variância do Laplaciano. */
 function sharpnessOf(canvas){
   const w = Math.min(320, canvas.width);
   const h = Math.max(1, Math.round(canvas.height * (w / canvas.width)));
@@ -1277,11 +1190,9 @@ function sharpnessOf(canvas){
     }
   }
   if(!n) return 0;
-  return sum2 / n - (sum / n) ** 2;    // variância
+  return sum2 / n - (sum / n) ** 2;
 }
 
-/* Vários quadros seguidos e fica o mais nítido: a mão treme, e um quadro
-   borrado é a causa mais comum de leitura errada. */
 async function grabBestFrame(tries = 3, gapMs = 110){
   // Logo depois de abrir a aba o vídeo ainda não tem imagem: espera um pouco
   // em vez de dizer que a câmera está desligada.
@@ -1301,10 +1212,7 @@ async function grabBestFrame(tries = 3, gapMs = 110){
   return best;
 }
 
-/* Prepara a foto para o leitor: amplia (letra pequena é o que mais atrapalha),
-   deixa em tons de cinza e estica o contraste pelos extremos reais da imagem,
-   em vez de um fator fixo. Com "invert", troca claro por escuro — é o que
-   salva caixa com letra branca em fundo colorido. */
+/* Contraste esticado pelos extremos reais da imagem, não por fator fixo. "invert" salva caixa com letra branca em fundo colorido. */
 function prepareForOcr(raw, { invert = false } = {}){
   if(!raw) return null;
   const target = 1500;
@@ -1356,7 +1264,6 @@ function hideScanProgress(){
   if(overlay) overlay.classList.add('hidden');
 }
 
-/* Botão "Ler o remédio": tira a foto, lê o texto e abre a tela de compra. */
 async function captureAndRead(){
   if(ocrRunning) return;
   if(!state.catalog.medicines.length){ showToast('O catálogo ainda está carregando. Tente em instantes.'); return; }
@@ -1376,10 +1283,9 @@ async function captureAndRead(){
     showToast('Ligue a câmera (ou envie uma foto) para eu ler o nome do remédio.');
     return;
   }
-  await readImage(canvas);   // segue ocupado até o fim da leitura
+  await readImage(canvas);
 }
 
-/* Mesma leitura, a partir de uma foto escolhida no aparelho. */
 async function readPhoto(input){
   const file = input.files && input.files[0];
   input.value = '';
@@ -1393,8 +1299,6 @@ async function readPhoto(input){
       img.onerror = () => reject(new Error('não consegui abrir a foto'));
       img.src = url;
     });
-    // Vira tela de desenho para receber o mesmo tratamento do quadro da câmera
-    // (contraste, ampliação e, se precisar, cores trocadas).
     const maxSide = 2000;
     const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
     const canvas = document.createElement('canvas');
@@ -1424,10 +1328,9 @@ async function setOcrMode(worker, psm){
       // Sem isto o Tesseract "chuta" a resolução da foto e lê pior.
       user_defined_dpi: '300',
     });
-  }catch{ /* versão do leitor sem esses ajustes */ }
+  }catch{}
 }
 
-// Quão boa foi uma leitura: achou remédio com certeza > achou algum > só letras.
 function gradeReading(reading){
   if(!reading) return { score: -1 };
   const quality = readingQuality(reading);
@@ -1441,11 +1344,7 @@ function gradeReading(reading){
   return { score, matched: !!best, sure: !!(best && best.sure), reading };
 }
 
-/* Uma foto, várias tentativas: o leitor erra bastante quando o modo de página
-   não combina com o que está na frente da câmera, ou quando a embalagem tem
-   letra clara em fundo escuro. Vai tentando e fica com a melhor leitura —
-   e para assim que uma delas reconhece o remédio com segurança. */
-// Enquanto lê, o botão fica ocupado: antes o toque era ignorado em silêncio.
+/* O leitor erra quando o modo de página não combina ou a letra é clara em fundo escuro: tenta vários e para na primeira leitura segura. */
 function setScanBusy(busy){
   const button = document.querySelector('.scanner-actions .btn-primary');
   if(button){
@@ -1475,7 +1374,6 @@ async function readImage(source){
     for(let i = 0; i < attempts.length; i++){
       const attempt = attempts[i];
       setScanProgress(0.4 + (i / attempts.length) * 0.5, attempt.label);
-      // A foto enviada do aparelho já vem pronta; só o quadro da câmera é tratado.
       const image = raw instanceof HTMLCanvasElement ? prepareForOcr(raw, { invert: attempt.invert }) : raw;
       if(!image || (attempt.invert && !(raw instanceof HTMLCanvasElement))) continue;
       await setOcrMode(worker, attempt.psm);
@@ -1484,7 +1382,7 @@ async function readImage(source){
       const result = await worker.recognize(image, {}, { text: true, blocks: true });
       const graded = gradeReading(buildReading(result && result.data, image));
       if(graded.score > best.score) best = graded;
-      if(best.sure) break;                       // achou com segurança: não precisa insistir
+      if(best.sure) break;
     }
 
     hideScanProgress();
@@ -1511,9 +1409,6 @@ function showScanReadError(error){
   });
 }
 
-/* ---- do texto lido para o remédio do catálogo ---- */
-
-// Distância de edição, para aguentar erro de leitura ("D1PIRONA" → "dipirona").
 function editDistance(a, b){
   if(a === b) return 0;
   if(Math.abs(a.length - b.length) > 2) return 99;
@@ -1535,14 +1430,11 @@ function editDistance(a, b){
 }
 
 const ocrTokens = text => normalizeText(text)
-  .replace(/(\d)\s*(mg|ml|g|mcg)\b/g, '$1$2')     // "500 mg" → "500mg"
+  .replace(/(\d)\s*(mg|ml|g|mcg)\b/g, '$1$2')
   .split(/[^a-z0-9]+/)
   .filter(Boolean);
 
-/* O leitor devolve cada palavra com uma confiança de 0 a 100 e o retângulo onde
-   ela está. Guardamos isso junto com o texto: é o que separa uma leitura de
-   verdade de um amontoado de letras que a câmera inventou ao mirar em qualquer
-   coisa — antes bastava uma palavra parecida para o app "achar" um remédio. */
+/* A confiança por palavra (0 a 100) e a posição separam leitura de verdade de letras inventadas pela câmera. */
 const OCR_CONF = {
   word: 62,     // palavra confiável
   exact: 66,    // mínimo para valer como nome igualzinho
@@ -1560,7 +1452,6 @@ function buildReading(data, source){
       height: w && w.bbox ? Math.abs((w.bbox.y1 || 0) - (w.bbox.y0 || 0)) : 0,
     }))
     .filter(w => w.text);
-  // Leitor sem detalhe por palavra: seguimos só com o texto, como antes.
   if(!words.length){
     words = text.split(/\s+/).filter(Boolean).map(t => ({ text: t, conf: null, height: 0 }));
   }
@@ -1583,11 +1474,7 @@ function collectOcrWords(data){
   return found;
 }
 
-// Separa o que dá para confiar. Sem confiança por palavra (leitor antigo),
-// trabalhamos com o texto inteiro, como antes.
 function readingQuality(reading){
-  // Vale tudo com dois caracteres de verdade: palavra ("mg"), número ("500")
-  // e as misturas que fazem parte do nome ("D3", "T4", "B12").
   const words = (reading.words || []).filter(w => (String(w.text).match(/[a-z0-9à-ú]/gi) || []).length >= 2);
   const scored = words.filter(w => w.conf != null);
   const mean = scored.length ? scored.reduce((sum, w) => sum + w.conf, 0) / scored.length : null;
@@ -1598,7 +1485,6 @@ function readingQuality(reading){
   return { words, scored, reliable, mean, strongest, hasConfidence: scored.length > 0 };
 }
 
-// Palavras lidas, já quebradas em pedaços comparáveis com o catálogo.
 function scanWords(reading){
   const quality = readingQuality(reading);
   const list = [];
@@ -1639,11 +1525,8 @@ function mergeDoseTokens(list){
   return out;
 }
 
-/* ---- dosagem: 500 mg é diferente de 1 g ----
-   Comparar texto não resolvia ("1g" e "1.000 mg" são a mesma coisa, "500mg" e
-   "500mg/ml" não são), então a dose vira número antes de comparar. */
+/* "1g" e "1.000 mg" são a mesma dose, "500mg" e "500mg/ml" não: a dose vira número antes de comparar. */
 
-// Letras que o leitor troca por número quando está lendo uma dosagem ("SOO mg").
 const DIGIT_LOOKALIKE = { o: '0', q: '0', l: '1', i: '1', s: '5', b: '8', z: '2' };
 // A câmera erra a unidade de jeitos conhecidos: "m" vira "rn" e "g" vira "q".
 // Só trocamos quando vem logo depois de um número, para não mexer em nomes.
@@ -1666,25 +1549,20 @@ function doseNumber(raw, allowLetters){
 function pushDose(found, value, unit, per, at = -1, perQty = null){
   if(value == null) return;
   if(per){
-    // concentração: "250mg/5ml" e "50mg/ml" viram a mesma conta (mg por ml)
     const porUnidade = perQty && perQty > 0 ? value / perQty : value;
     found.push({ cls: `${unit}/${per}`, value: porUnidade, at });
   }
   else if(unit === 'g') found.push({ cls: 'mg', value: value * 1000, at });
   else if(unit === 'mg') found.push({ cls: 'mg', value, at });
   else if(unit === 'mcg' || unit === 'ug') found.push({ cls: 'mg', value: value / 1000, at });
-  else found.push({ cls: unit, value, at });                              // ui, ml
+  else found.push({ cls: unit, value, at });
 }
 
-/* Todas as dosagens de um texto, em miligramas quando dá para converter.
-   Trabalha palavra por palavra — "500 mg", "500mg", "1 g" e "SOO mg" caem
-   todas no mesmo número, e o que está no meio de uma palavra é ignorado. */
 function parseDoses(text){
   let clean = normalizeText(text)
     .replace(/\bmiligramas?\b/g, 'mg').replace(/\bgramas?\b/g, 'g')
     .replace(/\bmicrogramas?\b/g, 'mcg').replace(/\bmililitros?\b/g, 'ml')
     .replace(UNIT_FIX, '$1mg').replace(/(\d\s*)rnl\b/g, '$1ml')
-    // concentração com espaços: "250 mg / 5 ml" vira "250mg/5ml"
     .replace(/(\d[\d.,]*)\s*(mg|mcg|ug|g|ui|ml)\s*\/\s*(\d+(?:[.,]\d+)?)?\s*(ml|g|dose)\b/g,
              (_, n, u, q, p) => `${n}${u}/${q || ''}${p}`);
   // número partido pelo leitor: "50 0 mg" é 500 mg (só junta se vier unidade depois)
@@ -1703,19 +1581,16 @@ function parseDoses(text){
   const found = [];
   for(let i = 0; i < words.length; i++){
     const word = words[i].text;
-    // tudo junto: "500mg", "500mg/ml"
     const glued = word.match(/^([0-9a-z.,]+?)(mg|mcg|ug|g|ui|ml)s?(?:\s*\/\s*(\d+(?:[.,]\d+)?)?\s*(ml|g|dose))?[^a-z0-9]*$/);
     if(glued){
       const value = doseNumber(glued[1], glued[1].length <= 4);
       if(value != null){ pushDose(found, value, glued[2], glued[4], words[i].at, doseNumber(glued[3], false)); continue; }
     }
-    // grudado no nome: "dipirona500mg" (o leitor junta tudo de vez em quando)
     const tail = word.match(/(\d[\d.,]*)(mg|mcg|ug|g|ui|ml)s?(?:\s*\/\s*(\d+(?:[.,]\d+)?)?\s*(ml|g|dose))?(?![a-z0-9])/);
     if(tail){
       const value = doseNumber(tail[1], false);
       if(value != null){ pushDose(found, value, tail[2], tail[4], words[i].at, doseNumber(tail[3], false)); continue; }
     }
-    // separado: "500" + "mg"
     const next = words[i + 1] && words[i + 1].text.match(UNIT_RE);
     if(next){
       const value = doseNumber(word, true);
@@ -1729,8 +1604,6 @@ function parseDoses(text){
    "Paracetamol 750mg, Amoxicilina 500mg" fazia o app achar que existia um
    paracetamol de 500mg na foto. */
 let catalogWordsCache = null;
-// Todas as palavras que aparecem em nome ou princípio ativo, inclusive as
-// genéricas: serve para saber se um pedaço grudado é mesmo palavra de remédio.
 function catalogWords(){
   if(catalogWordsCache && catalogWordsCache.size) return catalogWordsCache;
   const set = new Set();
@@ -1782,21 +1655,17 @@ function assignDoseOwners(text, doses){
 
 const sameDose = (a, b) => a.cls === b.cls && Math.abs(a.value - b.value) <= Math.max(a.value, b.value) * 0.02;
 
-// A dosagem que o próprio catálogo declara (fica guardada no remédio).
 function medicineDoses(med){
   if(!med.__doses) med.__doses = parseDoses(`${med.name} ${med.presentation || ''}`);
   return med.__doses;
 }
 
-// Quantidade da caixa: "20 comprimidos", "30 cápsulas", "1 unidade".
 function packSize(text){
   const match = normalizeText(text).match(/(\d{1,3})\s*(comprimid|capsul|drage|envelope|sache|unidade|adesivo|ampola)/);
   return match ? Number(match[1]) : null;
 }
 
-/* Palavras do catálogo que também são palavras do dia a dia (ou termos
-   químicos que se repetem em dezenas de remédios): sozinhas não provam nada.
-   É o que evitava "teste" virar "Teste de Gravidez". */
+/* Palavras do catálogo que também são do dia a dia (ou termos químicos repetidos em dezenas de remédios): sozinhas não provam nada. */
 const WEAK_TOKENS = new Set([
   'teste', 'rapido', 'agua', 'soro', 'oral', 'ultra', 'plus', 'forte', 'total', 'extra',
   'brasil', 'moura', 'ciclo', 'complexo', 'vitamina', 'calcio', 'ferro', 'zinco', 'oleo',
@@ -1805,14 +1674,12 @@ const WEAK_TOKENS = new Set([
   'cabelo', 'olhos', 'sodica', 'sodico', 'potassica', 'potassico', 'calcica', 'acido',
   'cloridrato', 'sulfato', 'fosfato', 'fumarato', 'maleato', 'besilato', 'nitrato',
   'bromidrato', 'dipropionato', 'monoidratada', 'micronizada', 'revestido', 'revestidos',
-  // produtos de cuidado: o nome é palavra comum e aparece em qualquer embalagem
   'algodao', 'gaze', 'mascara', 'luvas', 'luva', 'curativo', 'adesivo', 'esparadrapo',
   'termometro', 'preservativo', 'fralda', 'sabonete', 'repelente', 'compressa', 'bolsa',
   'alcool', 'oxigenada', 'protetor', 'solar', 'hidratante', 'locao', 'xampu', 'teste',
   'medidor', 'digital', 'lancetas', 'agulhas', 'descartavel', 'descartaveis', 'estereis',
 ]);
 
-// Uma palavra do remédio aparece na leitura? Devolve como ela apareceu.
 function tokenHit(token, words){
   let best = null;
   for(const word of words){
@@ -1858,7 +1725,7 @@ function scoreMedicine(med, words, readDoses = [], readPack = null, readText = '
   let score = 0, nameHits = 0;
 
   for(const token of nameTokens){
-    if(/^\d/.test(token)) continue;                          // dosagem é comparada por número
+    if(/^\d/.test(token)) continue;
     // "D3", "T4", "B12" são curtas mas fazem parte do nome: valem como apoio.
     const short = token.length < 4;
     if(short && !(token.length >= 2 && /\d/.test(token))) continue;
@@ -1871,7 +1738,6 @@ function scoreMedicine(med, words, readDoses = [], readPack = null, readText = '
     if(hit.kind === 'exact' && token.length >= 5 && !WEAK_TOKENS.has(token)) strongTokens.add(token);
   }
 
-  // O nome inteiro aparece escrito ("complexo b", "teste de gravidez").
   const phrase = normalizeText(med.name).replace(/\s*\d.*$/, '').trim();
   if(phrase.length >= 6 && phrase.includes(' ') && readText.includes(phrase)){
     matched.add(`frase:${phrase}`);
@@ -1901,11 +1767,9 @@ function scoreMedicine(med, words, readDoses = [], readPack = null, readText = '
     if(doseMatch) score += 4;
     else if(doseConflict) score -= 4;
   }
-  // "20 comprimidos" na caixa conferindo com a apresentação ajuda um pouco.
   if(matched.size && readPack && packSize(med.presentation || '') === readPack) score += 2;
 
   const hits = matched.size, strong = strongTokens.size;
-  // O nome do remédio é uma palavra só ("Dorflex", "Yasmin") e ela foi lida inteira.
   const wholeName = wordTokens.length === 1 && nameHits === 1 && strong > 0;
   /* Aceita também o nome quase certo com a dosagem batendo: "PARACETAMQL
      750mg" é um L lido como Q, não outro remédio. Nesse caso o app pergunta
@@ -1933,17 +1797,12 @@ function matchMedicines(input){
     .sort((a, b) => b.score - a.score || a.med.name.localeCompare(b.med.name));
 }
 
-// O texto só com as palavras em que dá para confiar.
 function scanText(reading){
   const quality = readingQuality(reading);
   const list = quality.reliable.length ? quality.reliable : quality.words;
   return list.length ? list.map(w => w.text).join(' ') : String(reading.text || '');
 }
 
-/* ---- caixa de remédio ou papel escrito? ----
-   A caixa tem letra grande, maiúscula e palavras de embalagem ("genérico",
-   "comprimidos", "VENDA SOB PRESCRIÇÃO"). A receita tem muitas linhas, letra
-   miúda e palavras de consultório ("paciente", "tomar", "CRM"). */
 const SCAN_SOURCES = {
   caixa:   { eyebrow: 'Lido na caixa',   where: 'na caixa' },
   receita: { eyebrow: 'Lido na receita', where: 'na receita' },
@@ -1989,15 +1848,11 @@ function scanEyebrow(source, fallback = 'Lido no texto'){
   return (SCAN_SOURCES[source] || {}).eyebrow || fallback;
 }
 
-// Primeira palavra do nome ("Dipirona Sódica 500mg" → "dipirona"): serve para
-// saber se dois resultados são o mesmo remédio em apresentações diferentes.
 function mainNameToken(med){
   return ocrTokens(med.name).find(token => token.length >= 4 && !/\d/.test(token)) || '';
 }
 
-/* Palavra mais provável de ser o nome do remédio, quando não achamos no
-   catálogo. Só aceita palavra que PARECE palavra e que foi lida com
-   segurança — senão o app oferecia procurar por "=modo" e coisas assim. */
+/* Só aceita palavra que PARECE palavra e foi lida com segurança. */
 const IGNORE_WORDS = ['comprimidos', 'comprimido', 'revestidos', 'capsulas', 'generico', 'medicamento',
   'similar', 'farmacia', 'drogaria', 'contem', 'oral', 'adulto', 'infantil', 'prescricao', 'medica',
   'venda', 'embalagem', 'posologia', 'receita', 'paciente', 'validade', 'fabricacao'];
@@ -2005,14 +1860,13 @@ const IGNORE_WORDS = ['comprimidos', 'comprimido', 'revestidos', 'capsulas', 'ge
 function looksLikeWord(word){
   if(!/^[a-z]{5,16}$/.test(word)) return false;
   const vowels = (word.match(/[aeiou]/g) || []).length;
-  if(vowels < 2 || vowels > word.length - 2) return false;     // precisa de vogal e de consoante
-  if(/(.)\1\1/.test(word)) return false;                       // "aaa" não é palavra
-  if(/[qwxz]{2}|[bcdfgjklmnpqrstvwxz]{4}/.test(word)) return false;   // monte de consoantes
+  if(vowels < 2 || vowels > word.length - 2) return false;
+  if(/(.)\1\1/.test(word)) return false;
+  if(/[qwxz]{2}|[bcdfgjklmnpqrstvwxz]{4}/.test(word)) return false;
   return true;
 }
 
 function bestGuessTerm(input){
-  // Só palavras bem lidas entram no chute.
   const words = typeof input === 'string'
     ? ocrTokens(input).map(token => ({ token, conf: null }))
     : scanWords(input).filter(w => w.conf == null || w.conf >= 78);
@@ -2023,13 +1877,10 @@ function bestGuessTerm(input){
 }
 
 function handleScannedText(input){
-  // Aceita tanto a leitura completa quanto só o texto.
   const reading = typeof input === 'string' ? { text: input, words: [], imageHeight: 0 } : (input || { text: '' });
   const clean = String(reading.text || '').replace(/\s+/g, ' ').trim();
   const quality = readingQuality(reading);
 
-  // Nada legível, letras embaralhadas ou objeto qualquer: a mensagem é a mesma,
-  // curta e sem mostrar o rabisco que o leitor achou que era texto.
   const unreadable = clean.length < 3 || !quality.words.length
     || (quality.hasConfidence && (!quality.reliable.length || quality.strongest < OCR_CONF.best));
   if(unreadable){
@@ -2040,8 +1891,6 @@ function handleScannedText(input){
   const source = classifyScanSource(reading);
   const matches = matchMedicines(reading);
   if(matches.length){
-    /* Receita (ou foto com várias caixas) traz mais de um remédio: em vez de
-       escolher um e esquecer o resto, abre a tela de seleção com todos. */
     const groups = groupScanMatches(matches, reading);
     if(groups.length >= 2){
       hideScanOutcome();
@@ -2051,22 +1900,17 @@ function handleScannedText(input){
 
     const best = matches[0];
     const clear = matches.length === 1 || best.score >= matches[1].score + 2;
-    // Achou com folga: mostra o remédio e o menor preço para confirmar.
     if(clear && best.sure){
       showScannedMedicine(best.med, source);
       return;
     }
-    // Empate entre apresentações do mesmo remédio (500mg, 750mg, gotas…):
-    // mostra o nome e deixa a pessoa escolher a dosagem na busca.
     const tied = matches.filter(m => m.score >= best.score - 1);
     const shared = mainNameToken(best.med);
     if(!clear && shared && tied.every(m => mainNameToken(m.med) === shared)){
-      // Sem a dosagem na foto, o app não tem como escolher entre 500mg e 1g.
       const doseRead = matches.some(m => m.doseMatch || m.doseConflict);
       showScannedTerm(shared, tied.map(m => m.med), source, doseRead);
       return;
     }
-    // Leu pouco (uma pista só): pergunta antes de abrir a compra.
     showUncertainMedicine(best.med, clean, source);
     return;
   }
@@ -2074,10 +1918,7 @@ function handleScannedText(input){
   showNoMedicineFound(bestGuessTerm(reading));
 }
 
-/* ---- vários remédios na mesma foto ----
-   Remédios diferentes são agrupados pelo princípio ativo: "Dipirona Sódica",
-   "Novalgina" e "Dorflex" são o mesmo achado (dipirona), enquanto losartana e
-   omeprazol são dois remédios de verdade. */
+/* Agrupa pelo princípio ativo: "Dipirona Sódica", "Novalgina" e "Dorflex" são o mesmo achado; losartana e omeprazol são dois. */
 function medicineFamily(med){
   const ingredient = ocrTokens(med.ingredient || '')
     .find(t => t.length >= 5 && !WEAK_TOKENS.has(t) && !/\d/.test(t));
@@ -2106,7 +1947,6 @@ function groupScanMatches(matches, reading){
     const related = groups.filter(g => keys.some(k => g.keys.has(k)));
     const group = related[0] || { keys: new Set(), best: null };
     if(!related.length) groups.push(group);
-    // Um achado pode ligar dois grupos que estavam separados: junta tudo.
     for(const other of related.slice(1)){
       other.keys.forEach(k => group.keys.add(k));
       if(!group.best || (other.best && other.best.score > group.best.score)) group.best = other.best;
@@ -2118,7 +1958,6 @@ function groupScanMatches(matches, reading){
   const list = groups
     .map(g => ({ ...g.best, key: g.best.read || medicineFamily(g.best.med) }))
     .filter(Boolean);
-  // Na ordem em que aparecem no papel (é assim que a receita está escrita).
   const position = group => {
     const tokens = [...ocrTokens(group.med.name), group.read, group.key].filter(t => t.length >= 4);
     const found = tokens.map(t => text.indexOf(t)).filter(i => i >= 0);
@@ -2131,9 +1970,7 @@ function groupScanMatches(matches, reading){
     .sort((a, b) => position(a) - position(b) || b.score - a.score);
 }
 
-/* Uma mensagem só para "não achei remédio nenhum", venha de foto ruim, de
-   objeto qualquer ou de um remédio fora do catálogo. Nunca mostra o texto
-   cru da leitura: era de lá que saíam os "=modo..." na tela. */
+/* Nunca mostra o texto cru da leitura: é ruído do OCR. */
 function showNoMedicineFound(guess = ''){
   showScanOutcome({
     tone: 'warn',
@@ -2149,9 +1986,6 @@ function showNoMedicineFound(guess = ''){
   });
 }
 
-/* Folha de resultado: sobe por cima da câmera com o que foi lido, o menor
-   preço e o caminho para a tela de compra. */
-
 // Menor preço e em quantas farmácias o remédio tem preço. Usa a mesma lista de
 // ofertas da tela de busca, para a etiqueta amarela bater com o "a partir de".
 function medPriceSummary(med){
@@ -2162,8 +1996,6 @@ function medPriceSummary(med){
   };
 }
 
-// O que a busca por este texto vai mostrar: os remédios (só os que têm preço em
-// alguma farmácia) e quantas farmácias aparecem no total.
 function searchPreview(term){
   const meds = medsMatchingQuery(term).filter(m => pharmacyOffers(m).length);
   const pharmacies = new Set();
@@ -2175,7 +2007,6 @@ function countLabel(n, one, many){
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// A etiqueta amarela sozinha (sem o "a partir de" em cima).
 function priceTagOnly(value){
   if(value == null) return '';
   const [reais, centavos] = formatBRL(value).replace(/^R\$\s*/, '').split(',');
@@ -2196,7 +2027,6 @@ function medSheetLine(med){
     .filter(Boolean).join(' · ');
 }
 
-// Resultado da leitura, numa folha branca sobre a câmera.
 function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body = '', price = null, note = '', buttons = [], footer = '' }){
   const box = $('scan-outcome');
   if(!box) return;
@@ -2218,7 +2048,6 @@ function showScanOutcome({ tone = 'ok', eyebrow = 'Lido na caixa', title, body =
   box.classList.remove('hidden');
 }
 
-// Remédio reconhecido: mostra o menor preço e leva para a comparação.
 function showScannedMedicine(med, source = 'caixa'){
   const { cheapest } = medPriceSummary(med);
   showScanOutcome({
@@ -2231,8 +2060,6 @@ function showScannedMedicine(med, source = 'caixa'){
   });
 }
 
-/* Combinou, mas com uma letra errada ou uma pista só: em vez de abrir a compra
-   do remédio errado, pergunta antes. */
 function showUncertainMedicine(med, text, source = 'texto'){
   const { cheapest } = medPriceSummary(med);
   showScanOutcome({
@@ -2248,10 +2075,7 @@ function showUncertainMedicine(med, text, source = 'texto'){
   });
 }
 
-// Vários tamanhos do mesmo remédio: abre a busca com todos.
 function showScannedTerm(term, meds, source = 'caixa', doseRead = true){
-  // A etiqueta mostra o mesmo preço que vai aparecer no topo da pesquisa, e a
-  // linha conta quantas apresentações e farmácias a pesquisa realmente tem.
   const preview = searchPreview(term);
   const list = preview.meds.length ? preview.meds : (meds || []);
   const cheapest = medPriceSummary(list[0]).cheapest;
@@ -2275,15 +2099,10 @@ function hideScanOutcome(){
   if(box){ box.classList.add('hidden'); box.innerHTML = ''; }
 }
 
-/* ---------------- calendário / lembretes ---------------- */
-
 const DOW = ['D','S','T','Q','Q','S','S'];
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-/* Os lembretes ficam salvos no banco, por conta. Um verificador roda a cada 20s
-   comparando com a hora real do dispositivo e dispara uma notificação nativa
-   do navegador (ou um aviso dentro do app, se notificações estiverem bloqueadas).
-   Funciona enquanto esta aba estiver aberta. */
+/* O verificador roda a cada 20s e só funciona enquanto a aba estiver aberta. */
 
 let reminderCheckInterval = null;
 
@@ -2299,7 +2118,6 @@ function requestNotificationPermission(){
 function startReminderEngine(){
   if(reminderCheckInterval) clearInterval(reminderCheckInterval);
   checkDueReminders();
-  // Espera o pop-up de boas-vindas sair antes de falar de reposição.
   setTimeout(checkRefillWarnings, 1500);
   reminderCheckInterval = setInterval(() => { checkDueReminders(); checkRefillWarnings(); }, 20000);
 }
@@ -2328,7 +2146,6 @@ function checkDueReminders(){
   });
   if(staleIds.length) api.markRemindersFired(staleIds, false).catch(()=>{});
   if(firedIds.length){
-    // O servidor marca como avisado e desconta as doses do estoque em casa.
     api.markRemindersFired(firedIds).then(result => {
       if(!result || !result.stocks || !result.stocks.length) return;
       result.stocks.forEach(stock => {
@@ -2347,32 +2164,23 @@ function fireReminderNotification(r){
   notify('Hora do remédio', `${r.med} — ${r.time}`);
 }
 
-// Notificação do navegador; se estiver bloqueada, avisa dentro do app.
 function notify(title, body){
   if('Notification' in window && Notification.permission === 'granted'){
     try{
       new Notification(title, { body, icon: 'assets/favicon.png' });
       return;
-    }catch{ /* cai no aviso interno abaixo */ }
+    }catch{}
   }
   showToast(`${title}: ${body}`);
 }
 
-/* ---------------- aviso de remédio acabando ----------------
-   Quem agenda um tratamento (7, 15, 30 dias) precisa comprar de novo antes
-   de acabar. Nos últimos dias de lembrete o app avisa para repor: um cartão
-   na aba Lembretes, um ponto na navegação e um aviso por dia. */
-
-const REFILL_WARNING_DAYS = 5;   // começa a avisar faltando 5 dias
-const REFILL_MIN_DAYS = 3;       // só vale para tratamento (não para um lembrete solto)
-
-/* ---- estoque em casa ---- */
+const REFILL_WARNING_DAYS = 5;
+const REFILL_MIN_DAYS = 3;
 
 // Mesma regra do servidor para comparar nomes de remédio.
 const medKeyOf = name => normalizeText(name).trim().replace(/\s+/g, ' ');
 const stockFor = med => state.stocks.find(s => s.key === medKeyOf(med)) || null;
 
-// Quantas doses por dia este remédio tem marcadas (1 se não houver lembrete futuro).
 function dosesPerDay(med){
   const key = medKeyOf(med);
   const today = startOfToday();
@@ -2389,7 +2197,6 @@ function dosesPerDay(med){
   return Math.max(1, Math.round(total / byDay.size));
 }
 
-// Para quantos dias dá o que tem em casa.
 function stockDaysLeft(med){
   const stock = stockFor(med);
   if(!stock) return null;
@@ -2401,7 +2208,6 @@ function stockDaysLeft(med){
 const unitsPhrase = stock =>
   `${Number(stock.units) % 1 === 0 ? stock.units : Number(stock.units).toFixed(1).replace('.', ',')} ${stock.unitLabel}`;
 
-// Guarda (ou corrige) a quantidade que a pessoa tem em casa.
 async function saveStock(med, units, perDose, unitLabel){
   try{
     const { stock } = await api.saveStock({ med, units, perDose, unitLabel: unitLabel || guessUnitLabel(med) });
@@ -2414,7 +2220,6 @@ async function saveStock(med, units, perDose, unitLabel){
   }
 }
 
-// Comprimido, dose ou ml — tirado da apresentação do remédio no catálogo.
 function guessUnitLabel(med){
   const found = state.catalog.medicines.find(m => medKeyOf(m.name) === medKeyOf(med));
   const text = normalizeText(found ? `${found.name} ${found.presentation}` : med);
@@ -2425,7 +2230,6 @@ function guessUnitLabel(med){
   return 'comprimidos';
 }
 
-// Caixa para informar/corrigir a quantidade (botões grandes + campo numérico).
 function askStock(med, { onSaved = null } = {}){
   const stock = stockFor(med);
   const label = stock ? stock.unitLabel : guessUnitLabel(med);
@@ -2462,7 +2266,6 @@ function askStock(med, { onSaved = null } = {}){
     ]);
   input = back.querySelector('#stock-units');
   if(input) input.focus();
-  // Os botões de atalho preenchem o campo.
   back.querySelectorAll('[data-units]').forEach(button => {
     button.onclick = () => {
       if(input) input.value = button.dataset.units;
@@ -2477,7 +2280,6 @@ const todayStamp = () => {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 };
 
-// Todos os remédios com lembrete, com o que importa para avisar sobre reposição.
 function treatmentSummary(){
   const today = startOfToday();
   const byMed = new Map();
@@ -2507,8 +2309,6 @@ function treatmentSummary(){
   });
 }
 
-// Quem precisa de aviso: ou o estoque de casa está acabando, ou os lembretes
-// estão no fim. O estoque manda, quando a pessoa informou quantos tem.
 function treatmentsEndingSoon(){
   return treatmentSummary()
     .filter(t => {
@@ -2519,7 +2319,6 @@ function treatmentsEndingSoon(){
     .sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
-// Frase principal do aviso, conforme o motivo.
 function refillPhrase(item){
   if(typeof item === 'number') item = { daysLeft: item, reason: 'agenda' };
   const days = item.daysLeft;
@@ -2534,14 +2333,12 @@ function refillPhrase(item){
   return `faltam só ${days} dias de lembrete`;
 }
 
-// Detalhe do estoque: "12 comprimidos · 2 por dia".
 function stockDetail(item){
   if(!item.stock) return '';
   const perDay = item.perDay * (item.stock.perDose || 1);
   return `${unitsPhrase(item.stock)} em casa · ${perDay} por dia`;
 }
 
-// Cartão no topo da aba Lembretes.
 function renderRefillAlert(){
   const box = $('refill-alert');
   if(!box) return;
@@ -2580,7 +2377,6 @@ function renderRefillAlert(){
   box.classList.remove('hidden');
 }
 
-// Ponto na navegação (aba Lembretes), igual ao dos pedidos.
 function updateRemindersBadge(){
   const count = treatmentsEndingSoon().length;
   document.querySelectorAll('[data-tab="calendar"] .nav-badge, [data-tab="calendar"] .bn-dot').forEach(el => el.remove());
@@ -2591,7 +2387,6 @@ function updateRemindersBadge(){
   if(bnBtn) bnBtn.insertAdjacentHTML('beforeend', '<span class="bn-dot"></span>');
 }
 
-// Avisa uma vez por dia para cada remédio (notificação + aviso na tela).
 function checkRefillWarnings(){
   if(!state.user) return;
   updateRemindersBadge();
@@ -2617,7 +2412,6 @@ function checkRefillWarnings(){
     ]);
 }
 
-// Leva para a busca já procurando o remédio que está acabando.
 function buyAgain(med){
   switchTab('home');
   const input = $('search-input');
@@ -2626,7 +2420,6 @@ function buyAgain(med){
   setTimeout(() => { $('results-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 120);
 }
 
-// Continua o tratamento: abre o formulário já preenchido, a partir do dia seguinte ao último.
 function extendTreatment(med){
   const item = treatmentsEndingSoon().find(t => t.med.toLowerCase() === med.toLowerCase());
   switchTab('calendar');
@@ -2637,12 +2430,6 @@ function extendTreatment(med){
   $('rem-med').scrollIntoView({ behavior: 'smooth', block: 'center' });
   showToast('Escolha o horário e confirme para continuar o tratamento.');
 }
-
-/* ---------------- tela de lembretes ----------------
-   Pensada para quem não tem intimidade com celular: três perguntas curtas,
-   botões grandes, horários e dias prontos para tocar, e um resumo em
-   português antes de confirmar. Quem toma o remédio todo dia cria todos os
-   lembretes de uma vez (7, 15 ou 30 dias). */
 
 const TIME_PRESETS = [
   { label: 'Manhã',  hint: '08:00', time: '08:00' },
@@ -2691,8 +2478,6 @@ function dayName(date){
   return `${date.getDate()} de ${MONTHS[date.getMonth()].toLowerCase()}`;
 }
 
-/* ---- escolhas do formulário ---- */
-
 function setReminderMed(name){
   $('rem-med').value = name;
   closeMedSuggestions();
@@ -2705,17 +2490,13 @@ function onReminderMedInput(){
   renderReminderSummary();
 }
 
-/* ---- sugestões enquanto digita o remédio ----
-   Uma lista curta embaixo do campo, como a barra de busca do navegador:
-   poucas opções para não tomar a tela do celular. */
-const MED_SUGGEST_MAX = 4;   // lista curta: não pode tomar a tela do celular
+const MED_SUGGEST_MAX = 4;
 let medSuggestIndex = -1;
 let medSuggestItems = [];
 
 function medSuggestions(typed){
   const query = typed.trim();
   if(query.length >= 2) return medsMatchingQuery(query).slice(0, MED_SUGGEST_MAX);
-  // Campo vazio: oferece o que a pessoa já comprou e, depois, os mais procurados.
   const bought = [...new Set(state.orders.flatMap(o => o.items.map(i => i.name)))];
   const recent = bought.map(name => state.catalog.medicines.find(m => m.name === name)).filter(Boolean);
   const list = [...recent, ...state.catalog.medicines.filter(m => !recent.includes(m))];
@@ -2801,7 +2582,6 @@ function toggleReminderCalendar(){
   reminderForm.calendarOpen = !reminderForm.calendarOpen;
   renderReminders();
 }
-// Passo 4: quantas unidades a pessoa tem em casa (e quantas toma por vez).
 function setReminderUnits(value, fromInput = false){
   const units = value === '' || value === null ? null : Number(value);
   reminderForm.units = Number.isFinite(units) && units >= 0 ? units : null;
@@ -2824,8 +2604,6 @@ function setReminderRepeat(days){
   renderReminderChips();
   renderReminderSummary();
 }
-
-/* ---- desenho da tela ---- */
 
 function renderReminders(){
   renderRefillAlert();
@@ -2881,11 +2659,10 @@ function renderReminderSummary(){
   const when = days === 1
     ? `${dayName(start)}`
     : `todos os dias, de ${dayName(start)} até ${dayName(addDays(start, days - 1))}`;
-  // Com a quantidade informada, já mostra para quantos dias dá o que tem em casa.
   let stockLine = '';
   if(reminderForm.units !== null){
     const label = guessUnitLabel(med || 'remédio');
-    const perDay = reminderForm.perDose;   // 1 lembrete por dia neste formulário
+    const perDay = reminderForm.perDose;
     const lasts = Math.floor(reminderForm.units / Math.max(1, perDay));
     stockLine = ` Você tem <b>${reminderForm.units} ${label}</b> em casa: dá para <b>${lasts} ${lasts === 1 ? 'dia' : 'dias'}</b>`
       + (lasts <= REFILL_WARNING_DAYS ? ' — vamos avisar para comprar mais.' : ', e avisamos quando estiver acabando.');
@@ -2920,8 +2697,6 @@ function calSelectDay(d){
   setReminderDate(new Date(state.calYear, state.calMonth, d));
 }
 
-/* ---- criar e apagar ---- */
-
 async function addReminder(){
   const med = $('rem-med').value.trim();
   if(!med){
@@ -2955,7 +2730,6 @@ async function addReminder(){
     }
   }
 
-  // Guarda quantas unidades a pessoa disse ter em casa (passo 4).
   if(created && reminderForm.units !== null){
     await saveStock(med, reminderForm.units, reminderForm.perDose);
     reminderForm.units = null;
@@ -2967,7 +2741,6 @@ async function addReminder(){
   button.disabled = false;
   if(created){
     $('rem-med').value = '';
-    // Quem acabou de agendar não precisa do pop-up de reposição agora.
     const seen = storage.get(refillKey()) || {};
     seen[med.trim().toLowerCase()] = todayStamp();
     storage.set(refillKey(), seen);
@@ -2989,7 +2762,6 @@ async function removeReminder(id){
   }
 }
 
-// Apagar um lembrete repetido tira todos os dias de uma vez (com confirmação).
 function removeReminderGroup(ids){
   const first = state.reminders.find(r => r.id === ids[0]);
   if(!first) return;
@@ -2999,7 +2771,7 @@ function removeReminderGroup(ids){
     [
       { label: `Apagar os ${ids.length}`, primary: true, onClick: async () => {
         for(const id of ids){
-          try{ await api.removeReminder(id); }catch{ /* segue apagando os outros */ }
+          try{ await api.removeReminder(id); }catch{}
         }
         state.reminders = state.reminders.filter(r => !ids.includes(r.id));
         renderReminders();
@@ -3009,9 +2781,6 @@ function removeReminderGroup(ids){
     ]);
 }
 
-/* ---- lista ---- */
-
-// Junta dias seguidos do mesmo remédio no mesmo horário num item só.
 function groupedReminders(){
   const sorted = [...state.reminders].sort((a, b) => {
     const dateA = new Date(a.year, a.month, a.day);
@@ -3032,7 +2801,6 @@ function groupedReminders(){
       groups.push({ med: reminder.med, time: reminder.time, dates: [date], ids: [reminder.id], pending: !reminder.fired });
     }
   }
-  // os que ainda vão acontecer primeiro
   return groups.sort((a, b) => Number(b.pending) - Number(a.pending) || a.dates[0] - b.dates[0]);
 }
 
@@ -3072,11 +2840,6 @@ function renderReminderList(){
   }).join('');
 }
 
-/* ---------------- pontos ----------------
-   Regras (calculadas no servidor):
-   - 1 ponto para cada R$1 pago, creditado ao confirmar a retirada.
-   - Pontos são trocados por cupons de desconto, usados no pagamento. */
-
 function applyPointsInfo(info){
   state.points = info.points;
   state.pointsInfo = { pending: info.pending, coupons: info.coupons, history: info.history };
@@ -3087,7 +2850,7 @@ async function refreshPoints(){
     applyPointsInfo(await api.points());
     updatePointsUI();
     if(state.activeTab==='points') renderPoints();
-  }catch{ /* mantém os dados atuais */ }
+  }catch{}
 }
 
 function updatePointsUI(){
@@ -3153,8 +2916,6 @@ async function redeem(id){
   }
 }
 
-/* ---------------- configurações / senha ---------------- */
-
 async function saveSettings(){
   const errBox = $('settings-pass-error');
   errBox.classList.add('hidden');
@@ -3170,7 +2931,7 @@ async function saveSettings(){
       currentPassword, newPassword, confirmPassword,
     });
     state.user = { ...state.user, ...user };
-    if(token){ api.setToken(token); storage.set(SESSION_KEY, token); }   // senha nova: os outros aparelhos saem da conta
+    if(token){ api.setToken(token); storage.set(SESSION_KEY, token); }
     $('settings-pass-current').value='';
     $('settings-pass').value='';
     $('settings-pass-confirm').value='';
@@ -3182,8 +2943,6 @@ async function saveSettings(){
   }
 }
 
-/* ---------------- toasts / modais ---------------- */
-
 let toastTimer=null;
 function showToast(msg){
   const t = $('toast');
@@ -3193,7 +2952,7 @@ function showToast(msg){
   toastTimer = setTimeout(()=> t.classList.remove('show'), 3400);
 }
 
-/* Modal no centro da tela. buttons: [{label, primary, onClick}] */
+/* buttons: [{label, primary, onClick}] */
 function showModal(iconSvg, title, bodyHtml, buttons = [{ label:'Entendi', primary:true }], { tone = '' } = {}){
   const back = document.createElement('div');
   back.className='modal-back';
@@ -3217,16 +2976,12 @@ function showModal(iconSvg, title, bodyHtml, buttons = [{ label:'Entendi', prima
   return back;
 }
 
-/* ---------------- inicialização ---------------- */
-
 let googleResizeTimer = null;
 window.addEventListener('resize', ()=>{
   clearTimeout(googleResizeTimer);
   googleResizeTimer = setTimeout(()=>{ if(!state.user) renderGoogleButtons(); }, 250);
 });
 
-// Os botões de remédio/horário/dia/repetição são desenhados por JS: um único
-// ouvinte por grupo cuida dos toques.
 function bindReminderChips(){
   $('rem-med-suggest').addEventListener('mousedown', event => {
     const button = event.target.closest('[data-med]');
@@ -3259,8 +3014,6 @@ function bindReminderChips(){
 }
 
 function initApp(){
-  // O servidor recusou a sessão no meio do uso: volta para o login em vez de
-  // deixar a tela aberta com tudo falhando.
   api.onSessionExpired = () => {
     if(!state.user) return;
     doLogout();

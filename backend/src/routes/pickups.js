@@ -1,9 +1,6 @@
-// Painel da farmácia (frontend/pharmacy.html).
-//
 // Quem está no balcão digita o código do pedido para conferir o que entregar e
 // confirmar a retirada. É essa confirmação que credita os pontos do cliente —
 // o próprio cliente não consegue mais dar o pedido como retirado.
-//
 // O acesso é protegido por uma senha única (PHARMACY_PIN). Num sistema real,
 // cada farmácia teria sua própria conta; aqui a senha é a mesma para todas.
 
@@ -49,7 +46,6 @@ function requirePin(req) {
 
 const cleanCode = value => String(value || '').replace(/\D/g, '');
 
-// Busca um pedido em aberto pelo código (os códigos são únicos entre os pedidos em aberto).
 async function findOpenOrder(db, code) {
   const { rows: [order] } = await db.query(
     `SELECT o.*, u.name AS customer_name
@@ -89,7 +85,6 @@ async function orderDetails(db, order) {
   };
 }
 
-// Confere o código e mostra o pedido, sem confirmar a retirada.
 router.post('/lookup', limitPickup, asyncHandler(async (req, res) => {
   requirePin(req);
   const code = cleanCode(req.body.code);
@@ -100,7 +95,6 @@ router.post('/lookup', limitPickup, asyncHandler(async (req, res) => {
   res.json({ order: await orderDetails({ query }, order) });
 }));
 
-// Confirma a entrega: conclui o pedido, credita os pontos e avisa o cliente.
 router.post('/confirm', limitPickup, asyncHandler(async (req, res) => {
   requirePin(req);
   const code = cleanCode(req.body.code);
